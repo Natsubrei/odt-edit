@@ -12,72 +12,39 @@
 8. **现成 `Heading_20_2` 常把「5.」和后面的字拆在不同 span 里。** 改标题用 `set_el_text` 整段换成纯文本即可，不必保留那些 span。
 9. **章节号是死文字。** `3.2 安装` 不会因插入新节自动变成 `3.3`。插入/删除带数字的小节后：改后续标题，并搜「见 3.2」「（见3.」这类交叉引用。
 
-## 标准助手源码（复制即用）
+## 标准助手（import，不要复制）
+
+以前这里是源码，要求复制进临时脚本。副本会各自漂移：同一轮任务里 `make_p` 改过 3 次，
+3 个副本各带一半的修复。现在是 `scripts/odthelper.py`，唯一真源。
 
 ```python
-from lxml import etree
-from odfdo import Paragraph, Header, NEXT_SIBLING, PREV_SIBLING
+import sys
+sys.path.insert(0, "<本技能目录>/scripts")
+import odthelper as H
 
-TEXT = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
-A_STYLE = "{%s}style-name" % TEXT
-
-def safe_t(el):
-    try: return el.text_recursive
-    except Exception: return ""
-
-def _xml(el):
-    return el if hasattr(el, "tag") else el._xml_element
-
-def set_el_text(el, s):
-    """清空子元素后写纯文本（保留样式属性与 outline-level）。会丢失书签/span，
-    也会删掉下级 list。只用于叶子 text:p / text:h，禁止传入 text:list-item。
-    TOC 引用的书签由 LibreOffice 刷新目录时重建。"""
-    x = _xml(el)
-    if etree.QName(x).localname == "list-item":
-        raise ValueError("set_el_text 不能用于 list-item，改用 set_item_label")
-    for ch in list(x):
-        x.remove(ch)
-    x.text = s
-
-def set_item_label(item, s):
-    """只改 list-item 里第一个 text:p 的文字，保留其后的下级 list。"""
-    x = _xml(item)
-    p = x.find("{%s}p" % TEXT)
-    if p is None:
-        raise ValueError("list-item 没有 text:p")
-    set_el_text(p, s)
-
-def make_p(style, text, span=None):
-    """造段落：\n→line-break，\t→tab，连续空格→" "+text:s。
-    span 给定时内容整体包进该 span（等宽行复制原文的 span 样式名）。"""
-    import re
-    p = Paragraph(style=style)
-    x = p._xml_element
-    host = x
-    if span:
-        sp = x.makeelement("{%s}span" % TEXT, {"{%s}style-name" % TEXT: span})
-        x.append(sp)
-        host = sp
-    def app(s):
-        if len(host): host[-1].tail = (host[-1].tail or "") + s
-        else: host.text = (host.text or "") + s
-    for li, line in enumerate(text.split("\n")):
-        if li: host.append(host.makeelement("{%s}line-break" % TEXT, {}))
-        for pi, part in enumerate(line.split("\t")):
-            if pi: host.append(host.makeelement("{%s}tab" % TEXT, {}))
-            if part: app(part)
-    return p
-
-def make_h(level, text, style):
-    h = Header(level=level, text=text)
-    h._xml_element.set(A_STYLE, style)
-    return h
-
-def insert_after(el, new): el.insert(new, xmlposition=NEXT_SIBLING)
-def insert_before(el, new): el.insert(new, xmlposition=PREV_SIBLING)
+doc = H.load("文件.odt")
+el = doc.body.children[12]
+H.set_el_text(el, "新标题")
+H.insert_after(el, H.make_p("TBMCode", "soffice --headless --convert-to pdf"))
+doc.save("新文件.odt")
 ```
 
-`set_el_text` / `set_item_label` 的 `_xml` 依赖 `from lxml import etree`。
+| 助手 | 作用 | 限制 |
+|---|---|---|
+| `load(path)` | 打开 ODT | |
+| `safe_t(el)` | 读文本，吞掉 `text_recursive` 的异常 | 含脚注/目录的节点返回 `""` |
+| `set_el_text(el, s)` | 清空子元素后写纯文本 | 只用于叶子 `text:p`/`text:h`；**传 `text:list-item` 会抛 ValueError** |
+| `set_item_label(item, s)` | 只改 list-item 的首个 p，保留下级 list | |
+| `make_p(style, text, span=None)` | 造段落：`\n`→line-break，`\t`→tab，连续空格→`text:s` | 等宽行要传原文档的 span 样式名 |
+| `make_h(level, text, style)` | 造标题并补回 style | odfdo 的 `Header` 会丢 style |
+| `insert_after` / `insert_before(el, new)` | 按参照元素插入 | 参照物是 `el` 自身，不是父节点 |
+| `set_style(el, style)` | 改段落/span 的样式名 | |
+
+两条不看代码就不知道的语义：
+
+- **`set_el_text` 会丢书签和 span。** TOC 引用的书签由 LibreOffice 刷新目录时重建，可以接受。
+- **`make_p` 里连续空格必须写成 `" "` + `<text:s text:c="n-1"/>`**，否则解析时被折叠成一个空格。
+  这一条旧版只写在注释里、代码没实现，等宽行里的对齐空格会静默塌掉。
 
 ## 列表
 
@@ -127,3 +94,51 @@ text:list                    <!-- 编号 -->
 - **列表点的形状和缩进只看 PNG。** `pdftotext` 会在连字符处折行：`foo-bar-baz` 在 `render.txt` 里会变成 `foobarbaz`。不要根据 txt 判断正文被改坏。
 - `javaldx` / java 警告可忽略。
 - Docker 构建：默认走官方 Debian 源。换镜像源设 `ODT_EDIT_APT_MIRROR`。宿主代理是 `127.0.0.1` 时，容器 bridge 网络连不上，设 `ODT_EDIT_DOCKER_NETWORK=host`。
+
+## 样式继承与渲染（最贵的两条）
+
+**LibreOffice 不把「自动样式」当作可继承的 `style:parent-style-name`。**
+
+`office:automatic-styles`（content.xml 里的自动样式）不能作为父样式被继承。
+写了也不报错，继承静默失败，上游的文字属性、段落属性**整个丢掉**，
+回落到文档默认样式（通常是 12pt 衬线体）。
+
+事故形态（都真实发生过）：
+
+- 段落样式 `A` 有字体，`B` 的父样式指向 `A`（自动样式），`B` 只声明了底色
+  → `B` 里的文字是默认衬线体，但**底色正常**。看起来像"字体没统一"。
+- `B` 的文字被 span 包住时，span 自带字体 → **同一行里两种字体**。
+- `End` 变体（只加段后间距）的父样式指向主样式 → 底色丢一行，
+  块末行露在白底外面。当时误判成"`fo:background-color` 不继承"，
+  其实根因是这条继承整条都没生效。
+
+**修法：每个样式写全自己的属性，不要靠继承。** 需要"主样式 + 变体"时，
+变体也把字体、行高、底色全部重写一遍。
+
+**`fo:font-family` 会盖过 `style:font-name`。** 只查 `style:font-name` 会漏判：
+有的 span 写的是 `fo:font-family="'Noto Serif SC'"` + `fo:font-size="9pt"`，
+字面上没有 `style:font-name`，按"等宽字体"筛选时会被跳过。
+归一化时要把 `font-family*`、`font-pitch*` 删掉，再显式写 `style:font-name`。
+
+**排查口诀**：渲染和 XML 不一致时，先怀疑自动样式继承，再对字体编号。
+
+```bash
+python3 scripts/odt_styles.py 文件.odt --warn-only     # 继承断裂 + 未定义样式
+python3 scripts/odt_styles.py 文件.odt --resolve 样式名 # 期望 vs 实际
+bash   scripts/render.sh 文件.odt
+python3 scripts/odt_probe.py 文件.odt --fonts          # 同一行两个等宽字体编号 = 掉回默认
+python3 scripts/odt_probe.py 文件.odt --crop X0 Y0 X1 Y1 --scale 4 --page N
+```
+
+**未定义样式也不会报错。** 正文引用 styles 里不存在的样式名（例如改名时漏改一处），
+LibreOffice 静默回落到默认样式。`odt_styles.py --warn-only` 会列出来，退出码非 0。
+
+## 渲染产物
+
+- `render.sh` 默认**不回写源文件**。加 `--refresh-toc` 才回写。
+  回写 = LibreOffice 重存 = 全部自动样式改名（`TBMCode` → `P123`），
+  之后按样式名做的处理全部失效。
+- 输出在 `$ODT_EDIT_WORK/<文件名去扩展>/`：`render.pdf`、`render.txt`、`pages/p-NN.png`。
+- `render.sh` 的 poppler 步骤（pdftotext/pdftoppm/pdfinfo）在宿主缺失时会自动进容器；
+  以前宿主没装 poppler 时这一步会静默失败。
+- 背景色、字号、同一行是否混字体，只信 `odt_probe.py` 的结果，不要靠肉眼。

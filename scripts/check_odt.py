@@ -1,12 +1,158 @@
 #!/usr/bin/env python3
 """ODT checks. Always: zip + mimetype.
 Optional: --require-toc --require-chapter-seq --forbid-nbsp --forbidden a,b
+          --font-audit              样式是否真正生效（只看 XML，不需要渲染）
+          --render                  另外核对渲染产物（需先跑 render.sh）
 Usage: python3 check_odt.py file.odt [flags]
 Exit 0=pass 1=fail.
+
+为什么需要 --font-audit：zip/TOC/章节号全过，样式仍可能整段失效。
+LibreOffice 不把自动样式当父样式，不认识的样式名也不报错，两处都静默回落到默认样式。
 """
 import sys, os, re, zipfile, argparse
 from paths import add_pylib, work
 add_pylib()
+
+
+def _hex_rgb(v):
+    v = (v or "").strip().lstrip("#")
+    if len(v) == 6:
+        try:
+            return tuple(int(v[i:i + 2], 16) for i in (0, 2, 4))
+        except ValueError:
+            return None
+    return None
+
+
+def audit_styles(path, problems):
+    """样式是不是真的生效。只看 XML，不靠渲染，很快。"""
+    import odt_styles as S
+
+    a = S.analyse(path)
+    n_bad = 0
+    for fam, label in (("paragraph", "段落"), ("text", "文字")):
+        for nm in a["missing"][fam]:
+            problems.append(
+                "%s样式 `%s` 未定义：正文引用了它，LibreOffice 静默回落默认样式" % (label, nm))
+            n_bad += 1
+        for r in a[fam + "s"]:
+            if not r["broken_at"]:
+                continue
+            lost = [S.DISPLAY.get(k, k) for k in sorted(set(r["expected"]) | set(r["actual"]))
+                    if r["expected"].get(k) != r["actual"].get(k)]
+            problems.append(
+                "%s样式 `%s`（%d 处）的继承在自动样式 `%s` 处中断，丢失属性：%s"
+                % (label, r["name"], r["count"], r["broken_at"], " ".join(lost) or "—"))
+            n_bad += 1
+    print("font-audit: %s" % ("发现 %d 处样式失效" % n_bad if n_bad
+                               else "样式均生效（无未定义样式、无继承断裂）"))
+
+
+def _bg_colours_seen(odt, wanted):
+    """在渲染页里找声明过的底色。按列扫，只认长度 >= 6 像素的同色段。"""
+    import collections
+    import odt_probe as P
+
+    pdir = os.path.join(P.out_dir(odt), "pages")
+    if not os.path.isdir(pdir):
+        return None, "找不到 %s，先跑 render.sh" % pdir
+    counts = collections.Counter()
+    names = sorted(f for f in os.listdir(pdir) if f.endswith(".png"))
+    for i, n in enumerate(names, 1):
+        w, h, ch, px = P.png_load(os.path.join(pdir, n))
+        for x in range(w // 8, w, max(1, w // 6)):
+            prev, run = None, 0
+            for y in range(h):
+                o = (y * w + x) * ch
+                c = tuple(px[o:o + 3])
+                if c == prev:
+                    run += 1
+                    continue
+                if prev and run >= 6 and prev != (255, 255, 255):
+                    counts[prev] += run
+                prev, run = c, 1
+            if prev and run >= 6 and prev != (255, 255, 255):
+                counts[prev] += run
+        if i % 10 == 0:
+            print("  ...已扫 %d/%d 页" % (i, len(names)), file=sys.stderr)
+    # 抗锯齿会造出大量杂色，只留有足够面积的
+    return {c for c, n in counts.items() if n >= 30}, None
+
+
+def audit_render(path, problems):
+    """核对渲染产物。需要先跑 render.sh。"""
+    import odt_probe as P
+    import odt_styles as S
+
+    d = P.out_dir(path)
+    if not os.path.isfile(os.path.join(d, "render.pdf")):
+        problems.append("--render 需要先跑 render.sh（找不到 %s/render.pdf）" % d)
+        return
+
+    _, total = P.font_usage(path)
+    if not total:
+        problems.append("--render 没能从 PDF 里读到字体，渲染产物可能不完整")
+        return
+
+    print("render: 用到 %d 种 (字体, 字号, 颜色) 组合" % len(total))
+    for (fam, size, col), n in total.most_common(12):
+        print("  %-24s size=%-4s color=%-9s %6d 字符" % (fam, size, col, n))
+
+    def bits(v):
+        try:
+            return int(float(v))
+        except (TypeError, ValueError):
+            return None
+
+    # 1. 等宽字体只应有一种。两种 = 有片段掉回了别的字体
+    monos = sorted({fam for fam in {k[0] for k in total}
+                    if re.search(r"Mono|Consol|Courier", fam, re.I)})
+    if len(monos) > 1:
+        problems.append("渲染里有 %d 种等宽字体（%s）：有片段掉回了别的字体"
+                        % (len(monos), ", ".join(monos)))
+
+    # 2. 同一等宽字体出现两个“几乎一样”的字号 = 有片段静默换了字号。
+    #    只查等宽：正文 12pt 与表格 10.5pt 这种差异是故意的，不是错误。
+    by_fam = {}
+    for fam, size, col in total:
+        by_fam.setdefault(fam, set()).add(size)
+    for fam in monos:
+        vals = sorted(b for b in (bits(s) for s in by_fam.get(fam, ())) if b is not None)
+        for a_, b_ in zip(vals, vals[1:]):
+            if b_ - a_ <= 2:
+                problems.append("等宽字体 %s 出现近乎重复的字号 %d 与 %d：有片段静默改了字号"
+                                % (fam, a_, b_))
+
+    # 3. 近色：视觉上一样、编码不同。同理
+    cols = sorted({k[2] for k in total if k[2] != "?"})
+    rgbs = [(c, _hex_rgb(c)) for c in cols]
+    for i in range(len(rgbs)):
+        for j in range(i + 1, len(rgbs)):
+            c1, r1 = rgbs[i]
+            c2, r2 = rgbs[j]
+            if r1 and r2 and max(abs(x - y) for x, y in zip(r1, r2)) <= 24:
+                problems.append("颜色 %s 与 %s 近乎相同：同一意图用了两个色值" % (c1, c2))
+
+    # 4. 声明了底色，渲染里就该找得到
+    declared = {}
+    for (fam, nm), el in S.analyse(path)["defs"].items():
+        v = S.props_of(el).get("background")
+        if v:
+            rgb = _hex_rgb(v)
+            if rgb and rgb != (255, 255, 255):
+                declared.setdefault(rgb, v)
+    if not declared:
+        print("render: 没有声明底色，跳过底色核对")
+        return
+    seen, err = _bg_colours_seen(path, declared)
+    if err:
+        problems.append(err)
+        return
+    for rgb, hexv in sorted(declared.items()):
+        if rgb in seen:
+            print("render: 底色 %s 在渲染中已出现" % hexv)
+        else:
+            problems.append("样式声明了底色 %s，但渲染页里找不到：底色没生效" % hexv)
 
 
 def main():
@@ -16,6 +162,10 @@ def main():
     ap.add_argument("--require-toc", action="store_true")
     ap.add_argument("--require-chapter-seq", action="store_true")
     ap.add_argument("--forbid-nbsp", action="store_true")
+    ap.add_argument("--font-audit", action="store_true",
+                    help="检查样式是否真正生效（未定义样式 / 继承断裂）")
+    ap.add_argument("--render", action="store_true",
+                    help="另外核对渲染产物：等宽字体数、同族字号、近色、声明的底色")
     args = ap.parse_args()
     path = args.path
     forbidden = [w for w in args.forbidden.split(",") if w]
@@ -129,6 +279,11 @@ def main():
                 problems.append(msg)
             else:
                 print("note:", msg)
+
+    if args.font_audit or args.render:
+        audit_styles(path, problems)
+    if args.render:
+        audit_render(path, problems)
 
     print("meta title:", doc.meta.get_title())
     if problems:

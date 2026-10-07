@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """Extract ODT body text (skip TOC; footnote-safe).
-Usage: python3 odt_text.py in.odt out.txt
+Usage: python3 odt_text.py in.odt out.txt [--keep-blanks]
+
+--keep-blanks: 空段落输出一个空行。默认会丢掉空段落，导致 diff 里
+               出现"凭空少了几行"的假象（渲染出来其实没变）。
 """
 import sys, os
 from paths import add_pylib, work
 add_pylib()
 
 
-def extract(path, out):
+def extract(path, out, keep_blanks=False):
     from odfdo import Document
     doc = Document(path)
     body = doc.body
@@ -47,6 +50,8 @@ def extract(path, out):
             t = safe(el)
             if t:
                 lines.append(t)
+            elif keep_blanks and el.get_attribute("text:style-name"):
+                lines.append("")
         elif tag == "text:list":
             dump_list(el, 0)
         elif tag == "table:table":
@@ -70,5 +75,7 @@ def extract(path, out):
 
 
 if __name__ == "__main__":
-    extract(sys.argv[1], sys.argv[2])
-    print(sys.argv[1], "->", sys.argv[2])
+    keep = "--keep-blanks" in sys.argv
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    extract(args[0], args[1], keep_blanks=keep)
+    print(args[0], "->", args[1])

@@ -25,11 +25,42 @@ python3 <skill-dir>/scripts/outline.py file.odt
 
 It prints body-child indexes, headings, list nesting, and style names. Run it before changing lists or inserting a section. Load with odfdo; **do all structural work on `el._xml_element` (lxml)**. Read `references/gotchas.md` before coding.
 
-Copy-paste helpers live in gotchas:
+Never judge styles by eye. Resolve them:
 
-- `set_el_text(el, s)` — leaf heading/paragraph only. Do not use odfdo `text_content`. Do not call on `text:list-item` (it deletes nested lists). Use `set_item_label` for the label of a numbered item.
-- `make_p(style, text, span=None)` — `\n`→line-break, `\t`→tab, consecutive spaces as `" "` + `<text:s>`. If the original wraps monospaced text in a span, pass that span style name.
-- `insert_after` / `insert_before` — `xmlposition=NEXT_SIBLING/PREV_SIBLING`.
+```bash
+python3 <skill-dir>/scripts/odt_styles.py file.odt
+```
+
+It prints the **resolved** properties (font, size, line height, margins, background, colour)
+grouped per style, and flags two failure classes:
+
+- **Undefined style** — the body references a style that does not exist; LibreOffice falls back silently.
+- **Broken inheritance** — `style:parent-style-name` points at an *automatic* style.
+  LibreOffice ignores that link, so inherited font, background, and line height are dropped
+  while the XML still looks correct.
+
+`--resolve NAME` prints one style's chain plus expected-vs-actual. `--warn-only` reports risks only (CI-friendly).
+
+Helpers are a module. Import them; do not copy them out of the docs:
+
+```python
+import sys
+sys.path.insert(0, "<skill-dir>/scripts")
+import odthelper as H
+
+doc = H.load("file.odt")
+el = doc.body.children[12]
+H.set_el_text(el, "new heading")
+H.insert_after(el, H.make_p("TBMCode", "soffice --headless"))
+doc.save("new.odt")
+```
+
+- `set_el_text(el, s)` — leaf heading/paragraph only. Do not use odfdo `text_content`. **Raises ValueError on `text:list-item`** (it deletes nested lists). Use `set_item_label` for a numbered item.
+- `make_p(style, text, span=None)` — `\n`→line-break, `\t`→tab, consecutive spaces as `" "` + `<text:s text:c="n-1"/>`. If the original wraps monospaced text in a span, pass that span style name.
+- `insert_after` / `insert_before` — `xmlposition=NEXT_SIBLING/PREV_SIBLING`, relative to the caller.
+- `make_h(level, text, style)` — odfdo `Header` drops the style; this puts it back.
+
+Semantics and limits of each helper: see the table in `references/gotchas.md`.
 - Remove comments: delete `//office:annotation` and `//office:annotation-end`. Apply useful comment text to the body first.
 
 Rules:
@@ -47,15 +78,57 @@ python3 <skill-dir>/scripts/check_odt.py new.odt [--forbidden w1,w2]
 
 Always: zip integrity and mimetype (must be first, uncompressed). Optional: `--require-toc`, `--require-chapter-seq`, `--forbid-nbsp`. Compare table/image counts with the pre-edit baseline.
 
+Style diagnosis (mandatory once you touched styles; non-zero exit means undefined styles or broken inheritance):
+
+```bash
+python3 <skill-dir>/scripts/odt_styles.py new.odt --warn-only
+python3 <skill-dir>/scripts/check_odt.py new.odt --font-audit           # XML only, fast
+python3 <skill-dir>/scripts/check_odt.py new.odt --font-audit --render  # also check the render
+```
+
+**Why this matters:** zip, TOC, and chapter numbering can all pass while styles are entirely
+ineffective. Every other `check_odt.py` check is structural or textual and cannot detect it.
+This really happened: the document printed PASS while a config line rendered as 12pt serif
+with no grey background.
+
+`--font-audit` checks undefined styles and broken inheritance (~1s).
+`--render` additionally checks the render: count of monospace families, near-duplicate sizes
+within a monospace family, near-duplicate colours, and whether a declared background colour
+actually appears in the render (~6s, needs a prior `render.sh`).
+
 ## 3. Visual QA + TOC refresh
 
-LibreOffice is the layout source of truth. TOC fields must be refreshed by LibreOffice:
+LibreOffice is the layout source of truth. The render is **read-only by default**:
 
 ```bash
 bash <skill-dir>/scripts/render.sh new.odt [pages...]
+bash <skill-dir>/scripts/render.sh new.odt --refresh-toc   # refresh TOC fields and write back
 ```
 
-Docker+UNO refreshes TOC and writes the ODT back, then exports PDF/PNG. Without Docker, host `soffice` exports PDF only (no TOC refresh). Inspect **changed pages plus a sample of unchanged pages**.
+Output goes to `$ODT_EDIT_WORK/<stem>/`: `render.pdf`, `render.txt`, `pages/p-NN.png`.
+Per-document directories, so versions never clobber each other.
+
+**Why no write-back by default:** writing back makes LibreOffice re-save the document and rename
+every automatic style (`TBMCode` → `P123`). Any later work keyed on style names then breaks.
+When the document has no TOC field the refresh is a no-op, so the write-back is pure risk.
+
+Inspect **changed pages plus a sample of unchanged pages**.
+
+XML alone cannot tell you what renders. Substituted fonts, a background one line short,
+two fonts inside one line — check the render output:
+
+```bash
+python3 <skill-dir>/scripts/odt_probe.py new.odt --fonts
+python3 <skill-dir>/scripts/odt_probe.py new.odt --page-of "some text"
+python3 <skill-dir>/scripts/odt_probe.py new.odt --bg 700 100 600 --page 11
+python3 <skill-dir>/scripts/odt_probe.py new.odt --crop 85 470 330 500 --scale 4 --page 11
+```
+
+- `--fonts`: (family, size, colour) actually used in the PDF, with character counts.
+  **Two monospace font ids inside one line means a fragment fell back to body style.**
+- `--bg`: background colour runs down one pixel column, to verify a background covers a whole block.
+- `--crop`: zoomed PNG crop for glyph inspection. 4x makes "two fonts in one line" obvious.
+- `--page-of`: which page holds a string.
 
 Bullet shape and indent: **PNG only**. `render.txt` wraps at hyphens (`foo-bar-baz` → `foobarbaz`). Ignore `javaldx` warnings.
 
