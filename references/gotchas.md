@@ -16,7 +16,7 @@
 12. **`doc.body.children[i]` 是 odfdo 包装对象**，没有 `.get()` / `.find()` 这些 lxml 方法。取底层元素统一用 `H.xml_of(el)`，不要猜 `_xml_element`——`doc.meta` 这类对象就没有这个属性。
 13. **改已有文字用 `H.replace_text(el, old, new, expect=1)`**，别用 `set_el_text` 整段重写：后者会丢掉 span、书签和 `text:soft-page-break`。`replace_text` 命中数不符直接抛异常，等于自带断言。
 14. **改文档属性走 odfdo 的 mixin**：`doc.meta.set_title(...)`、`doc.meta.set_modification_date(datetime)`。没有 `_xml_element`，也没有 `find()`。
-15. **克隆已有段落当模板，先清空子节点再写文本。** 文本框/文件内容块的末行常被拆成多个 span，克隆它做模板后，只写首个 span 的助手会留下残余 span，旧文字直接接到新文字后面。真实事故：往 yml 框追加一行，框末行 `xpack.security.enabled: false` 有 2 个 span，渲染出 `bootstrap.memory_lock: true false`。修法：`for c in list(tpl): tpl.remove(c)` 后再写 `.text`，或改用先清空子元素的 `set_el_text`。
+15. **克隆已有段落当模板，先清空子节点再写文本。** 文本框/文件内容块的末行常被拆成多个 span，克隆它做模板后，只写首个 span 的助手会留下残余 span，旧文字直接接到新文字后面。真实事故：往 yml 框追加一行，框末行 `xpack.security.enabled: false` 有 2 个 span，渲染出 `bootstrap.memory_lock: true false`。修法：用 `H.clone_row(tpl, text)`（它已按「先清空再写」实现），或自己 `for c in list(tpl): tpl.remove(c)` 后再写 `.text`。检测：`check_odt.py --blocks` 会报出被非等宽行切开的块。
 
 ## 标准助手（import，不要复制）
 
@@ -89,6 +89,9 @@ text:list                    <!-- 编号 -->
 - 相邻重复文本扫描必须**先折叠空白**再正则，否则对齐空格串全命中（纯误报）。
 - 残留词检查跳过 TOC 子树（TOC 是历史字段，刷新后自然更新）。
 - 全文 NBSP 计数预期为 0（归一化完成后）；任何 >0 都是回归。
+- **等宽行的缩进只用 `H.leading_spaces(el)` 或 `check_odt.py --indent` 读。**
+  `itertext()` / `text_recursive` / `render.txt` 都不展开 `text:s`，缩进恒读成 0；
+  而 `check_odt.py --blocks` 能报出「等宽块被非等宽行切开」（灰底断带）。
 
 ## 渲染 / LibreOffice
 
@@ -149,6 +152,9 @@ LibreOffice 静默回落到默认样式。`odt_styles.py --warn-only` 会列出�
 - `render.sh` 的 poppler 步骤（pdftotext/pdftoppm/pdfinfo）在宿主缺失时会自动进容器；
   以前宿主没装 poppler 时这一步会静默失败。
 - 背景色、字号、同一行是否混字体，只信 `odt_probe.py` 的结果，不要靠肉眼。
+- 同时产出 `render.layout.txt`（`pdftotext -layout`）。它**保留折行**：
+  `render.txt` 把行尾连字符折行处重新拼回去并吃掉那个 `-`，看起来像文档丢了字符；
+  怀疑丢字时先看 layout 版，再查 XML（`"".join(el.itertext())`）。
 
 ## 渲染产物的新鲜度
 

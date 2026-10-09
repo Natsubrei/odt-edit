@@ -60,6 +60,9 @@ doc.save("new.odt")
 - `make_p(style, text, span=None)` — `\n`→line-break, `\t`→tab, consecutive spaces as `" "` + `<text:s text:c="n-1"/>`. If the original wraps monospaced text in a span, pass that span style name.
 - `insert_after` / `insert_before` — `xmlposition=NEXT_SIBLING/PREV_SIBLING`, relative to the caller.
 - `make_h(level, text, style)` — odfdo `Header` drops the style; this puts it back.
+- `clone_row(tpl, text, indent=None)` — build a line from an existing paragraph as template (the paragraph style follows the template). **Use it when appending rows to a file-content block or text box**: the template's last line is often split across several spans, and helpers that replace only the first span leave the old text behind (`… : true false`). `indent=None` keeps the template's indent.
+- `leading_spaces(el)` — leading spaces, `<text:s text:c="n"/>` expanded. **Always use it to measure indent**: neither `itertext()` nor `text_recursive` expands `text:s`, so they always read 0.
+- `clear_content(el)` — drop children and `.text`, keep attributes (style name).
 
 Semantics and limits of each helper: see the table in `references/gotchas.md`.
 - Remove comments: delete `//office:annotation` and `//office:annotation-end`. Apply useful comment text to the body first.
@@ -89,6 +92,19 @@ python3 <skill-dir>/scripts/check_odt.py new.odt --font-audit           # XML on
 python3 <skill-dir>/scripts/check_odt.py new.odt --font-audit --render  # also check the render
 python3 <skill-dir>/scripts/check_odt.py new.odt --toc-pages            # TOC numbers vs real pagination
 ```
+
+Block structure and alignment (invisible to plain text extraction; run it after touching any code block):
+
+```bash
+python3 <skill-dir>/scripts/check_odt.py new.odt --blocks
+python3 <skill-dir>/scripts/check_odt.py new.odt --indent "<name>dfs.blocksize</name>"
+```
+
+- `--blocks`: lists contiguous monospaced blocks (chapter / line count / first line) and reports blocks
+  **split by a non-monospaced line**. Inserting a lead-in sentence in the middle of an existing file-content
+  block splits it in two — the XML looks fine, the render shows a gap in the shaded background.
+  Numbered step lines (`3. …`, `（3）…`) count as legitimate separators and are not reported.
+- `--indent`: leading spaces (with `text:s` expanded) and style name per matching paragraph; repeatable.
 
 **Why this matters:** zip, TOC, and chapter numbering can all pass while styles are entirely
 ineffective. Every other `check_odt.py` check is structural or textual and cannot detect it.
@@ -137,9 +153,9 @@ python3 <skill-dir>/scripts/odt_probe.py new.odt --crop 85 470 330 500 --scale 4
   **Two monospace font ids inside one line means a fragment fell back to body style.**
 - `--bg`: background colour runs down one pixel column, to verify a background covers a whole block.
 - `--crop`: zoomed PNG crop for glyph inspection. 4x makes "two fonts in one line" obvious.
-- `--page-of`: which page holds a string.
+- `--page-of`: which page holds a string. Add `--quiet` to print page numbers only, one per line.
 
-Bullet shape and indent: **PNG only**. `render.txt` wraps at hyphens (`foo-bar-baz` → `foobarbaz`). Ignore `javaldx` warnings.
+Bullet shape and indent: **PNG only**. For the hyphen-wrap and de-hyphenation traps of `render.txt` (it swallows the trailing `-`, which looks like lost characters) see `references/gotchas.md`; `render.layout.txt` (`pdftotext -layout`) keeps the line breaks — check it first, then the XML. Ignore `javaldx` warnings.
 
 ## 4. Diff
 

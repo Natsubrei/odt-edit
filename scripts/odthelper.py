@@ -16,6 +16,7 @@
 
 全部结构性操作都走 lxml 层（`el._xml_element`）。理由见 references/gotchas.md。
 """
+import copy
 import os
 import re
 import sys
@@ -26,7 +27,7 @@ from paths import add_pylib  # noqa: E402
 add_pylib()
 
 from lxml import etree  # noqa: E402
-from odfdo import Header, NEXT_SIBLING, PREV_SIBLING, Paragraph  # noqa: E402
+from odfdo import Header, Paragraph  # noqa: E402
 
 TEXT = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
 A_STYLE = "{%s}style-name" % TEXT
@@ -83,6 +84,92 @@ def set_item_label(item, s):
     set_el_text(p, s)
 
 
+def _emit(host, s):
+    """把 s 追加到 host 的文字流末尾（无子节点时写 .text，否则写末子节点的 .tail）。"""
+    if len(host):
+        host[-1].tail = (host[-1].tail or "") + s
+    else:
+        host.text = (host.text or "") + s
+
+
+def _append(host, s):
+    """追加文字。连续空格写成 " " + <text:s text:c="n-1"/>，
+    否则 ODF 解析时会被折叠成一个空格。
+    """
+    for seg in re.split(r"( {2,})", s):
+        if not seg:
+            continue
+        if set(seg) == {" "}:
+            _emit(host, " ")
+            sp = host.makeelement("{%s}s" % TEXT, {"{%s}c" % TEXT: str(len(seg) - 1)})
+            host.append(sp)
+        else:
+            _emit(host, seg)
+
+
+def leading_spaces(el):
+    """段落的前导空格数，<text:s text:c="n"/> 按 n 个空格展开。
+
+    不要用 text_recursive 或 "".join(el.itertext()) 量缩进：它们不展开 text:s，
+    结果恒为 0。等宽行的对齐就是靠 text:s 实现的，缩进在纯文本层看不见。
+    也别只数第一个 text:s —— 缺 text:c 属性时要按 1 个空格算。
+    """
+    x = xml_of(el)
+
+    def feed(t):
+        st = t.lstrip(" ")
+        return len(t) - len(st), not st
+
+    n = 0
+    if x.text:
+        k, still_blank = feed(x.text)
+        n += k
+        if not still_blank:
+            return n
+    for child in x:
+        if not isinstance(child.tag, str):
+            continue
+        if etree.QName(child).localname != "s":
+            return n
+        c = child.get("{%s}c" % TEXT)
+        n += int(c) if (c or "").isdigit() else 1
+        if child.tail:
+            k, still_blank = feed(child.tail)
+            n += k
+            if not still_blank:
+                return n
+    return n
+
+
+def clear_content(el):
+    """清空元素内容：删掉全部子节点并把 .text 置空，保留属性（样式名等）。"""
+    x = xml_of(el)
+    for ch in list(x):
+        x.remove(ch)
+    x.text = None
+    return el
+
+
+def clone_row(tpl, text, indent=None):
+    """以 tpl 为模板造一行：段落样式跟着 tpl，正文换成 text。
+
+    indent=None 沿用 tpl 的前导缩进；给数字则用该空格数（仍用 text:s 编码）。
+    返回 lxml 元素，可直接交给 insert_after 或 append 到 text-box。
+
+    为什么必须先清空再写：模板末行常被拆成多个 span（如 yml 的
+    "xpack.security.enabled: false"），只替换首个 span 的写法会残留旧文字，
+    渲染出 "bootstrap.memory_lock: true false"。
+    """
+    x = copy.deepcopy(xml_of(tpl))
+    n = leading_spaces(x) if indent is None else indent
+    clear_content(x)
+    if n:
+        sp = etree.SubElement(x, "{%s}s" % TEXT)
+        sp.set("{%s}c" % TEXT, str(n))
+    _append(x, text)
+    return x
+
+
 def make_p(style, text, span=None):
     """造段落：\\n→line-break，\\t→tab，连续空格→" "+text:s。
 
@@ -96,28 +183,13 @@ def make_p(style, text, span=None):
         x.append(sp)
         host = sp
 
-    def app(s):
-        if len(host):
-            host[-1].tail = (host[-1].tail or "") + s
-        else:
-            host.text = (host.text or "") + s
-
     for li, line in enumerate(text.split("\n")):
         if li:
             host.append(host.makeelement("{%s}line-break" % TEXT, {}))
         for pi, part in enumerate(line.split("\t")):
             if pi:
                 host.append(host.makeelement("{%s}tab" % TEXT, {}))
-            # 连续空格要写成 " " + <text:s text:c="n-1">，否则解析时被折叠
-            for si, seg in enumerate(re.split(r"( {2,})", part)):
-                if not seg:
-                    continue
-                if seg.startswith("  "):
-                    app(" ")
-                    n = host.makeelement("{%s}s" % TEXT, {"{%s}c" % TEXT: str(len(seg) - 1)})
-                    host.append(n)
-                else:
-                    app(seg)
+            _append(host, part)
     return p
 
 
@@ -129,11 +201,14 @@ def make_h(level, text, style):
 
 
 def insert_after(el, new):
-    el.insert(new, xmlposition=NEXT_SIBLING)
+    """按参照元素插入。el 与 new 都可以是 odfdo 包装对象或裸 lxml 元素
+    （build 脚本里找出来的段落就是 lxml 元素，以前传进来会报没有 .insert）。
+    """
+    xml_of(el).addnext(getattr(new, "_xml_element", new))
 
 
 def insert_before(el, new):
-    el.insert(new, xmlposition=PREV_SIBLING)
+    xml_of(el).addprevious(getattr(new, "_xml_element", new))
 
 
 def set_style(el, style):

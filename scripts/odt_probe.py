@@ -141,7 +141,7 @@ def cmd_fonts(odt, page=None):
     print("颜色种类: %s" % ", ".join(sorted({k[2] for k in total})))
 
 
-def cmd_page_of(odt, needle):
+def cmd_page_of(odt, needle, quiet=False):
     d = out_dir(odt)
     txt = os.path.join(d, "render.txt")
     if not os.path.isfile(txt):
@@ -157,9 +157,14 @@ def cmd_page_of(odt, needle):
         hits = [i for i, p in enumerate(pages, 1)
                 if tight in re.sub(r"\s+", "", p)]
     if hits:
-        print("出现页: %s" % ", ".join(map(str, hits)))
+        if quiet:
+            print("\n".join(map(str, hits)))
+        else:
+            print("出现页: %s" % ", ".join(map(str, hits)))
     else:
         print("未找到 %r。提示：pdftotext 会在连字符处折行，长串可能被拆开。" % needle)
+    if quiet:
+        return
     for i, p in enumerate(pages, 1):
         if want in norm(p):
             for line in p.splitlines():
@@ -318,6 +323,8 @@ def main():
     g.add_argument("--bg", nargs=3, metavar=("X", "Y0", "Y1"), help="某列的背景色连续段")
     g.add_argument("--crop", nargs=4, metavar=("X0", "Y0", "X1", "Y1"), help="裁剪放大")
     g.add_argument("--page-of", metavar="文本", help="文字在第几页")
+    ap.add_argument("--quiet", action="store_true",
+                    help="--page-of 只输出页码（一行一个），便于管道解析")
     g.add_argument("--pages", action="store_true", help="已渲染的页")
     ap.add_argument("--page", type=int, default=1)
     ap.add_argument("--scale", type=int, default=3)
@@ -330,7 +337,7 @@ def main():
     elif args.crop:
         cmd_crop(args.odt, args.page, *(int(v) for v in args.crop), args.scale)
     elif args.page_of:
-        cmd_page_of(args.odt, args.page_of)
+        cmd_page_of(args.odt, args.page_of, quiet=args.quiet)
     else:
         cmd_pages(args.odt)
 

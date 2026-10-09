@@ -164,4 +164,64 @@ if python3 "$HERE/odt_probe.py" "$ROOT/examples/leaf.odt" --pages 2>/dev/null; t
   echo "expected odt_probe --pages to fail without a render" >&2
   exit 1
 fi
+
+# --blocks：两个 2 行的等宽块被一句普通正文切开，必须报出来（渲染上是灰底断带）
+BLK="$ROOT/examples/split-block.odt"
+if python3 "$HERE/check_odt.py" "$BLK" --blocks >/tmp/_blk.txt 2>&1; then
+  echo "expected --blocks to fail on a split block" >&2
+  cat /tmp/_blk.txt >&2
+  exit 1
+fi
+grep -q "切开" /tmp/_blk.txt
+# 没被切开的文档不应报切开
+if python3 "$HERE/check_odt.py" "$ROOT/examples/leaf.odt" --blocks 2>/dev/null | grep -q "切开"; then
+  echo "--blocks 误报：leaf.odt 没有等宽块" >&2
+  exit 1
+fi
+
+# --indent：text:s 必须展开（" " + text:s c=3 → 4），不能用 itertext 量成 0
+python3 "$HERE/check_odt.py" "$BLK" --indent "indented line" | grep -q "indent=4" \
+  || { echo "--indent 没有展开 text:s" >&2; exit 1; }
+
+# odt_text：省略 out 时写 stdout，且提示不污染管道
+python3 "$HERE/odt_text.py" "$ROOT/examples/leaf.odt" | grep -q "A leaf paragraph." \
+  || { echo "odt_text stdout 模式失效" >&2; exit 1; }
+if python3 "$HERE/odt_text.py" "$ROOT/examples/leaf.odt" | grep -q " -> "; then
+  echo "odt_text 的提示信息漏到了 stdout" >&2
+  exit 1
+fi
+
+# clone_row / leading_spaces：多 span 模板不得残留旧文字
+python3 - "$ROOT" <<'PY'
+import sys
+sys.path.insert(0, sys.argv[1] + "/scripts")
+import odthelper as H          # 先 import 它：内部调 add_pylib()，lxml 才在 sys.path 上
+from lxml import etree
+
+TEXT = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+q = lambda t: "{%s}%s" % (TEXT, t)
+
+# 末行被拆成两个 span 的模板（真实事故形状）
+tpl = etree.Element(q("p"))
+a = etree.SubElement(tpl, q("span")); a.text = "xpack.security.enabled: "
+b = etree.SubElement(tpl, q("span")); b.text = "false"
+row = H.clone_row(tpl, "bootstrap.memory_lock: true")
+assert "".join(row.itertext()) == "bootstrap.memory_lock: true", \
+    "clone_row 残留了模板 span：%r" % "".join(row.itertext())
+
+# 缩进：" " + text:s c=4 → 5；缺 text:c 时按 1 算；无缩进为 0
+p = etree.Element(q("p")); p.text = " "
+s = etree.SubElement(p, q("s")); s.set(q("c"), "4"); s.tail = "x"
+assert H.leading_spaces(p) == 5, H.leading_spaces(p)
+p2 = etree.Element(q("p")); p2.text = " "
+s2 = etree.SubElement(p2, q("s")); s2.tail = "x"
+assert H.leading_spaces(p2) == 2, H.leading_spaces(p2)
+assert H.leading_spaces(etree.Element(q("p"))) == 0
+# 继承模板缩进
+row2 = H.clone_row(p, "y")
+assert H.leading_spaces(row2) == 5, H.leading_spaces(row2)
+assert "".join(row2.itertext()) == "y"
+print("clone_row / leading_spaces OK")
+PY
+
 echo SELFTEST_OK

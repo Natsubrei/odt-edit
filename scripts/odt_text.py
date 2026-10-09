@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Extract ODT body text (skip TOC; footnote-safe).
-Usage: python3 odt_text.py in.odt out.txt [--keep-blanks]
+Usage: python3 odt_text.py in.odt [out.txt] [--keep-blanks]
+
+out.txt 省略时写 stdout（提示信息一律走 stderr，不污染管道）。
 
 --keep-blanks: 空段落输出一个空行。默认会丢掉空段落，导致 diff 里
                出现"凭空少了几行"的假象（渲染出来其实没变）。
 """
-import sys, os
+import sys, os, argparse
 from paths import add_pylib, work
 add_pylib()
 
@@ -66,16 +68,28 @@ def extract(path, out, keep_blanks=False):
             n_img += len(el.xpath(".//draw:image"))
         except Exception:
             pass
-    parent = os.path.dirname(out)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    with open(out, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
+    if out:
+        parent = os.path.dirname(out)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(out, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
     return lines, n_img
 
 
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="提取 odt 正文为纯文本")
+    ap.add_argument("odt")
+    ap.add_argument("out", nargs="?", help="输出文件；省略则写 stdout")
+    ap.add_argument("--keep-blanks", action="store_true", help="空段落输出空行")
+    a = ap.parse_args(argv)
+    lines, _n_img = extract(a.odt, a.out, keep_blanks=a.keep_blanks)
+    if a.out:
+        print("%s -> %s" % (a.odt, a.out), file=sys.stderr)
+    else:
+        sys.stdout.write("\n".join(lines) + "\n")
+    return 0
+
+
 if __name__ == "__main__":
-    keep = "--keep-blanks" in sys.argv
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    extract(args[0], args[1], keep_blanks=keep)
-    print(args[0], "->", args[1])
+    sys.exit(main())

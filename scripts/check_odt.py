@@ -206,6 +206,117 @@ def audit_toc_pages(path, problems):
                         "不收敛时按渲染分页回填目录字段里的数字" % (len(bad), len(entries), detail, more))
 
 
+def audit_blocks(path, problems):
+    """把正文切成“连续等宽段落块”，报告块被切碎的地方。
+
+    等宽行就是命令/文件内容块。块被一个普通段落从中间切开时，渲染上会出现
+    灰色空白（底色断成两段），XML 本身看不出任何异常。
+    典型事故：往已有文件内容块后面追行时，中间插了一句引导语。
+    """
+    from lxml import etree
+    import odt_styles as S
+
+    info = S.analyse(path)
+    mono = {}
+    for row in info["paragraphs"]:
+        props = row["actual"]
+        font = " ".join(str(props.get(k) or "")
+                         for k in ("font", "font_family", "font_asian"))
+        mono[row["name"]] = bool(re.search(r"Mono|Consol|Courier", font, re.I)) or \
+            bool(re.search(r"Code|File|Mono|Pre", row["name"] or ""))
+
+    content = S.build(path)[0]
+    body = content.find(".//" + S.q(S.OFFICE, "text"))
+    if body is None:
+        problems.append("--blocks 找不到正文节点")
+        return
+
+    chapter, rows = "", []
+    for e in body:
+        if not isinstance(e.tag, str):
+            continue
+        local = etree.QName(e).localname
+        if local == "h":
+            chapter = "".join(e.itertext()).strip()
+        elif local == "p":
+            style = e.get(S.q(S.TEXT, "style-name"))
+            text = "".join(e.itertext()).strip()
+            if mono.get(style):
+                rows.append((chapter, "code", text, style))
+            elif text:
+                rows.append((chapter, "prose", text, style))
+            else:
+                rows.append((chapter, "blank", "", style))
+
+    # 连续 code 行 = 一个块
+    blocks, i = [], 0
+    while i < len(rows):
+        if rows[i][1] != "code":
+            i += 1
+            continue
+        j = i
+        while j < len(rows) and rows[j][1] == "code":
+            j += 1
+        blocks.append((rows[i][0], j - i, rows[i][2], i))
+        i = j
+
+    print("blocks: %d 个块，%d 行等宽内容" % (len(blocks), sum(b[1] for b in blocks)))
+    last_ch = None
+    for ch, n, first, _idx in blocks:
+        if ch != last_ch:
+            print("  %s" % (ch or "(无章节)"))
+            last_ch = ch
+        print("    %3d 行  %s" % (n, first[:64]))
+
+    # 块被单个非等宽行从中间切开。
+    # 判据收窄到“两侧块都 >=2 行”：本文档的正常写法是「说明句 + 单条命令」交替，
+    # 两侧都是单行块时中间夹一句说明是结构，不是事故。
+    split_at = []
+    for a, b in zip(blocks, blocks[1:]):
+        if a[0] != b[0]:
+            continue
+        gap = rows[a[3] + a[1]:b[3]]
+        step_re = re.compile(r"^\s*(\d+[.、)]|（\d+）|\(\d+\))")
+        if len(gap) == 1 and gap[0][1] in ("prose", "blank") and a[1] >= 2 and b[1] >= 2 \
+                and not step_re.match(gap[0][2]):
+            split_at.append((a[0], gap[0][1], gap[0][2], a[1], b[1]))
+    if split_at:
+        detail = "; ".join("%s「%s」(%d 行块后接 %d 行块)"
+                           % (ch, (t or "(空行)")[:28], n1, n2) for ch, _k, t, n1, n2 in split_at[:6])
+        more = "；另有 %d 处" % (len(split_at) - 6) if len(split_at) > 6 else ""
+        problems.append("等宽块被非等宽行切开 %d 处（渲染会出现底色断带、"
+                        "该行字体也不一致）：%s%s" % (len(split_at), detail, more))
+    ones = [b for b in blocks if b[1] == 1]
+    if ones:
+        print("  提示：单行块 %d 个（合法但常是被切断的块），例：%s"
+              % (len(ones), "; ".join(b[2][:36] for b in ones[:4])))
+
+
+def audit_indent(path, needle):
+    """打印含 needle 的段落：样式名 + 前导空格数（展开 text:s 后）。
+
+    为什么需要：diff_odt.py / odt_text.py / render.txt 都不展开 text:s，
+    等宽行的对齐在纯文本层完全看不见，改错了也看不出来。
+    """
+    import odthelper as H
+    import odt_styles as S
+
+    content = S.build(path)[0]
+    body = content.find(".//" + S.q(S.OFFICE, "text"))
+    hits = 0
+    for p in body.iter(S.q(S.TEXT, "p")):
+        text = "".join(p.itertext())
+        if needle in text:
+            hits += 1
+            print("  indent=%d  %-16s %s"
+                  % (H.leading_spaces(p),
+                     p.get(S.q(S.TEXT, "style-name")) or "-",
+                     text.strip()[:72]))
+    if not hits:
+        print("  indent: 未找到 %r" % needle)
+    return hits
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("path")
@@ -215,6 +326,10 @@ def main():
     ap.add_argument("--forbid-nbsp", action="store_true")
     ap.add_argument("--font-audit", action="store_true",
                     help="检查样式是否真正生效（未定义样式 / 继承断裂）")
+    ap.add_argument("--blocks", action="store_true",
+                    help="列出连续等宽段落块，报告被非等宽行切开的块（灰底断带）")
+    ap.add_argument("--indent", metavar="文本", action="append",
+                    help="打印匹配段落的前导空格数（展开 text:s）与样式名；可重复")
     ap.add_argument("--render", action="store_true",
                     help="另外核对渲染产物：等宽字体数、同族字号、近色、声明的底色")
     ap.add_argument("--toc-pages", action="store_true",
@@ -256,6 +371,10 @@ def main():
     print(
         f"structure: headings {len(hs)} | top {len(tops)} | tables {n_tbl} | images {n_img} | notes {n_ann}"
     )
+    if args.blocks:
+        audit_blocks(path, problems)
+    for needle in args.indent or []:
+        audit_indent(path, needle)
     if not seq_ok:
         msg = f"chapter numbers not 1..n: {nums}"
         if args.require_chapter_seq:

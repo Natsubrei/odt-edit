@@ -1,0 +1,17 @@
+name: selftest
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # selftest.sh 纯 Python：ODT_EDIT_SKIP_DOCKER=1，不需要 Docker 与 LibreOffice。
+      # 它内部会跑 setup_env.sh --python-only 取 odfdo/lxml wheel（需要网络）。
+      - run: bash scripts/selftest.sh

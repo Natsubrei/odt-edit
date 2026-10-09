@@ -31,17 +31,21 @@ ODT_EDIT_BUILD_IMAGE=1 bash scripts/setup_env.sh
 | Script | Role |
 |---|---|
 | `scripts/outline.py` | Print headings and list nesting |
-| `scripts/check_odt.py` | Zip/mimetype always; TOC/chapter/NBSP optional |
-| `scripts/odthelper.py` | Importable edit helpers (`set_el_text`, `make_p`, `insert_after`, …) |
+| `scripts/check_odt.py` | Zip/mimetype always; TOC/chapter/NBSP, style resolution, block structure, indent |
+| `scripts/odthelper.py` | Importable edit helpers (`set_el_text`, `make_p`, `clone_row`, `leading_spaces`, …) |
 | `scripts/odt_styles.py` | Resolve effective style properties; flag broken inheritance |
 | `scripts/diff_odt.py` | Body diff; `--styles` adds a style-property diff |
-| `scripts/odt_text.py` | Extract body text; `--keep-blanks` keeps empty paragraphs |
-| `scripts/render.sh` | Read-only PDF + PNG render; `--refresh-toc` to write back |
-| `scripts/odt_probe.py` | Inspect the render: fonts, background runs, zoomed crops |
+| `scripts/odt_text.py` | Extract body text; `out` optional (stdout); `--keep-blanks` keeps empty paragraphs |
+| `scripts/render.sh` | Read-only PDF + PNG + `render.txt`/`render.layout.txt`; `--refresh-toc` writes back |
+| `scripts/odt_probe.py` | Inspect the render: fonts, background runs, zoomed crops, `--page-of --quiet` |
 | `scripts/make_examples.py` | Write `examples/*.odt` fixtures |
 
 `check_odt.py` flags: `--require-toc` `--require-chapter-seq` `--forbid-nbsp` `--forbidden a,b`
-`--font-audit` (undefined styles / broken inheritance) `--render` (also check the render output).
+`--font-audit` (undefined styles / broken inheritance) `--blocks` (monospaced-block structure)
+`--indent TEXT` (leading spaces, `text:s` expanded) `--render` (also check the render output)
+`--toc-pages` (TOC numbers vs render pagination).
+
+`scripts/selftest.sh` runs in CI (`.github/workflows/selftest.yml`); it needs no Docker or LibreOffice.
 
 `render.sh` never modifies the source unless you pass `--refresh-toc`. Output lands in
 `$ODT_EDIT_WORK/<stem>/`: `render.pdf`, `render.txt`, `pages/p-NN.png`.

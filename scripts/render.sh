@@ -65,10 +65,11 @@ render_from_pdf() {
   else
     pp="pdftoppm -png -r 110 render.pdf pages/p"
   fi
-  run_poppler "pdftotext render.pdf render.txt && rm -f pages/*.png && $pp && pdfinfo render.pdf | grep Pages"
+  run_poppler "pdftotext render.pdf render.txt && pdftotext -layout render.pdf render.layout.txt && rm -f pages/*.png && $pp && pdfinfo render.pdf | grep Pages"
   echo "PDF: $WORK/render.pdf"
   echo "PNG: $WORK/pages/"
   echo "TXT: $WORK/render.txt （按换页符 \\f 分页；连字符处会折行，不能当正文证据）"
+  echo "LAY: $WORK/render.layout.txt （-layout 保留折行，怀疑“丢字”时看这份）"
 }
 
 find_soffice() { command -v soffice || command -v libreoffice || true; }

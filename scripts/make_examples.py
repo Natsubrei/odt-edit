@@ -17,8 +17,14 @@ CONTENT = """<?xml version="1.0" encoding="UTF-8"?>
 </office:document-content>
 """
 STYLES = """<?xml version="1.0" encoding="UTF-8"?>
-<office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" office:version="1.3">
-  <office:styles/>
+<office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+ xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" office:version="1.3">
+  <office:styles>
+    <style:style style:name="Mono" style:family="paragraph">
+      <style:text-properties style:font-name="Consolas" fo:font-size="10.5pt"/>
+    </style:style>
+  </office:styles>
   <office:automatic-styles/>
   <office:master-styles/>
 </office:document-styles>
@@ -62,6 +68,17 @@ BODIES = {
         "no-toc",
         """<text:h text:outline-level="1">Plain</text:h>
 <text:p>This file has no table of contents.</text:p>""",
+    ),
+    # 两个 2 行的等宽块被一句普通正文切开：check_odt.py --blocks 必须报出来。
+    # 第二行用 " " + <text:s text:c="3"/> 编码 4 个前导空格：--indent 必须报 4。
+    "split-block.odt": (
+        "split-block",
+        """<text:h text:outline-level="1">Blocks</text:h>
+<text:p text:style-name="Mono"># cmd one</text:p>
+<text:p text:style-name="Mono"># cmd two</text:p>
+<text:p>Stray lead-in sentence.</text:p>
+<text:p text:style-name="Mono"> <text:s text:c="3"/>indented line</text:p>
+<text:p text:style-name="Mono"># cmd four</text:p>""",
     ),
 }
 

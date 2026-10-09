@@ -60,6 +60,9 @@ doc.save("新文件.odt")
 - `make_p(style, text, span=None)` — 造段落。`\n`→line-break、`\t`→tab、**连续空格必须编码为 " "+`<text:s text:c="n-1"/>`**（ODF 会折叠字面空格串）。原文若用 span 包等宽内容，把那个 span 的样式名传进去。
 - `insert_after/insert_before(el, new)` — 基于 `xmlposition=NEXT_SIBLING/PREV_SIBLING`，参照物是调用者自身。
 - `make_h(level, text, style)` — odfdo 的 `Header` 会丢 style，这个助手补回来。
+- `clone_row(tpl, text, indent=None)` — 以已有段落为模板造一行，段落样式跟着模板。**往文件内容块或文本框里追行时用它**：模板末行常被拆成多个 span，只替换首个 span 的写法会残留旧文字（`… : true false`）。`indent=None` 沿用模板的前导缩进。
+- `leading_spaces(el)` — 段落的前导空格数，`<text:s text:c="n"/>` 按 n 展开。**量缩进必须用它**：`itertext()` 与 `text_recursive` 都不展开 `text:s`，结果恒为 0。
+- `clear_content(el)` — 清空内容（子节点 + `.text`），保留属性（样式名等）。
 
 各函数的语义与限制见 `references/gotchas.md` 的对照表。
 - 清批注：遍历 `//office:annotation` 与 `//office:annotation-end` 逐个 `el.delete()`；批注里的合理建议应落实为正文再删除。
@@ -89,6 +92,20 @@ python3 <本技能目录>/scripts/check_odt.py 新文件.odt --font-audit       
 python3 <本技能目录>/scripts/check_odt.py 新文件.odt --font-audit --render # 还要核对渲染
 python3 <本技能目录>/scripts/check_odt.py 新文件.odt --toc-pages           # 目录页码 vs 渲染分页
 ```
+
+块结构与对齐（纯文本层看不见的那一类，动过代码块或等宽内容就必跑）：
+
+```bash
+python3 <本技能目录>/scripts/check_odt.py 新文件.odt --blocks
+python3 <本技能目录>/scripts/check_odt.py 新文件.odt --indent "<name>dfs.blocksize</name>"
+```
+
+- `--blocks`：把正文切成连续等宽块，列出「章节 / 行数 / 首行」，并报出**被非等宽行切开**的块。
+  往已有的文件内容块后面追行时，中间插了一句引导语就会切成两段——XML 看着完全正常，
+  渲染上是灰底断带。编号步骤句（`3. …`、`（3）…`）视为合法分隔，不报。
+- `--indent`：打印匹配段落的前导空格数（展开 `text:s`）与样式名，可重复传多个。
+  `diff_odt.py`、`odt_text.py`、`render.txt` 都不展开 `text:s`：等宽行的对齐在纯文本层完全看不见，
+  改错了也看不出来。
 
 **为什么必须有这一项**：zip、目录、章节号全过，样式仍可能整段失效。
 `check_odt.py` 的其余检查全是结构性和文本性的，一条也发现不了"样式没生效"。
@@ -134,9 +151,9 @@ python3 <本技能目录>/scripts/odt_probe.py 新文件.odt --crop 85 470 330 5
 - `--fonts`：PDF 里实际用到的 (字体, 字号, 颜色) 及字符数。**同一行内出现两个等宽字体编号 = 有片段掉回正文样式**。
 - `--bg`：某列像素的背景色连续段。验证底色有没有盖满整块（"灰底少一行"就是这么查出来的）。
 - `--crop`：裁剪放大成 PNG，看字形。判断"是不是两种字体"时放大 4 倍最直观。
-- `--page-of`：文字在第几页，不靠文件名猜。
+- `--page-of`：文字在第几页，不靠文件名猜。加 `--quiet` 只输出页码（一行一个），便于管道解析。
 
-列表点的形状（空心圆 / 实心圆 / 方点）和缩进**只看 PNG**。`render.txt` 会在连字符处折行，`foo-bar-baz` 会变成 `foobarbaz`；行尾连字符处折行再合并时还会删掉行尾的 `-`，症状像文档丢字符——先查 XML 再怀疑文档，不能当正文证据。`javaldx` 警告可忽略。
+列表点的形状（空心圆 / 实心圆 / 方点）和缩进**只看 PNG**。`render.txt` 的折行与去连字符陷阱见 `references/gotchas.md`「渲染产物」——它会吞掉行尾的 `-`，看起来像文档丢了字符。`render.layout.txt`（`pdftotext -layout`）保留折行，怀疑丢字时先看它，再查 XML。`javaldx` 警告可忽略。
 
 ## 4. Diff
 
