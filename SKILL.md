@@ -136,7 +136,7 @@ python3 <本技能目录>/scripts/odt_probe.py 新文件.odt --crop 85 470 330 5
 - `--crop`：裁剪放大成 PNG，看字形。判断"是不是两种字体"时放大 4 倍最直观。
 - `--page-of`：文字在第几页，不靠文件名猜。
 
-列表点的形状（空心圆 / 实心圆 / 方点）和缩进**只看 PNG**。`render.txt` 会在连字符处折行，`foo-bar-baz` 会变成 `foobarbaz`，不能当正文证据。`javaldx` 警告可忽略。
+列表点的形状（空心圆 / 实心圆 / 方点）和缩进**只看 PNG**。`render.txt` 会在连字符处折行，`foo-bar-baz` 会变成 `foobarbaz`；行尾连字符处折行再合并时还会删掉行尾的 `-`，症状像文档丢字符——先查 XML 再怀疑文档，不能当正文证据。`javaldx` 警告可忽略。
 
 ## 4. Diff
 

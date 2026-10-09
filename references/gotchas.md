@@ -16,6 +16,7 @@
 12. **`doc.body.children[i]` 是 odfdo 包装对象**，没有 `.get()` / `.find()` 这些 lxml 方法。取底层元素统一用 `H.xml_of(el)`，不要猜 `_xml_element`——`doc.meta` 这类对象就没有这个属性。
 13. **改已有文字用 `H.replace_text(el, old, new, expect=1)`**，别用 `set_el_text` 整段重写：后者会丢掉 span、书签和 `text:soft-page-break`。`replace_text` 命中数不符直接抛异常，等于自带断言。
 14. **改文档属性走 odfdo 的 mixin**：`doc.meta.set_title(...)`、`doc.meta.set_modification_date(datetime)`。没有 `_xml_element`，也没有 `find()`。
+15. **克隆已有段落当模板，先清空子节点再写文本。** 文本框/文件内容块的末行常被拆成多个 span，克隆它做模板后，只写首个 span 的助手会留下残余 span，旧文字直接接到新文字后面。真实事故：往 yml 框追加一行，框末行 `xpack.security.enabled: false` 有 2 个 span，渲染出 `bootstrap.memory_lock: true false`。修法：`for c in list(tpl): tpl.remove(c)` 后再写 `.text`，或改用先清空子元素的 `set_el_text`。
 
 ## 标准助手（import，不要复制）
 
@@ -97,6 +98,7 @@ text:list                    <!-- 编号 -->
 - 中文渲染必须装 `fonts-noto-cjk`，否则全是豆腐块。
 - 定位"某内容在第几页"：`pdftotext` 输出按 `\f` 分页后查找，不要按 PNG 文件名猜。
 - **列表点的形状和缩进只看 PNG。** `pdftotext` 会在连字符处折行：`foo-bar-baz` 在 `render.txt` 里会变成 `foobarbaz`。不要根据 txt 判断正文被改坏。
+- **`pdftotext` 还会把「丢字」表演出来。** 文档里长代码行在 token 中间折行、行尾恰好是连字符时（如 `… -XX:+UseG1GC -` / `XX:MaxGCPauseMillis…`），pdftotext 按去连字符合并两行，行尾 `-` 被删掉，渲染文本显示成 `XX:MaxGCPauseMillis`——症状完全像文档丢了字符。怀疑丢字先查 XML（`"".join(el.itertext())`），XML 对就是渲染的假象。
 - `javaldx` / java 警告可忽略。
 - Docker 构建：默认走官方 Debian 源。换镜像源设 `ODT_EDIT_APT_MIRROR`。宿主代理是 `127.0.0.1` 时，容器 bridge 网络连不上，设 `ODT_EDIT_DOCKER_NETWORK=host`。
 
