@@ -72,6 +72,7 @@ def props_of(el):
                           ("size", q(FO, "font-size")),
                           ("size_asian", q(STYLE, "font-size-asian")),
                           ("color", q(FO, "color")),
+                          ("background", q(FO, "background-color")),
                           ("weight", q(FO, "font-weight")),
                           ("style", q(FO, "font-style")),
                           ("underline", q(STYLE, "text-underline-style"))):

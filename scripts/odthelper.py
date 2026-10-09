@@ -139,3 +139,29 @@ def insert_before(el, new):
 def set_style(el, style):
     """改段落/span 的样式名。"""
     xml_of(el).set(A_STYLE, style)
+
+
+def replace_text(el, old, new, expect=1):
+    """在元素及其后代里做定点文字替换，命中数不符就抛 ValueError。
+
+    比 set_el_text 安全：只改文字槽，span / 书签 / soft-page-break 等结构原样保留。
+    改已有段落优先用它，不要整段重写。
+
+    注意 lxml 的 iter() 会先给出元素自身，而自身的 .tail 属于父元素之后的文字，
+    动它会改到兄弟节点外面去，所以根节点只取 .text。
+    """
+    x = xml_of(el)
+    hits = 0
+    first = True
+    for n in x.iter():
+        attrs = ("text",) if first else ("text", "tail")
+        first = False
+        for attr in attrs:
+            v = getattr(n, attr)
+            if v and old in v:
+                hits += v.count(old)
+                setattr(n, attr, v.replace(old, new))
+    if hits != expect:
+        raise ValueError("replace_text: %r 命中 %d 处，期望 %d 处"
+                         % (old[:40], hits, expect))
+    return hits

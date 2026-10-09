@@ -23,7 +23,7 @@ bash <本技能目录>/scripts/setup_env.sh
 python3 <本技能目录>/scripts/outline.py 文件.odt
 ```
 
-它打印正文子节点下标、标题、列表嵌套和样式名。改列表或插入小节前必须跑。修改用 odfdo 加载，**结构性操作全部走 lxml 层（`el._xml_element`）**——odfdo 包装 API 有多个坑，动手前必读 `references/gotchas.md`。
+它打印正文子节点下标、标题、列表嵌套和样式名。改列表或插入小节前必须跑。修改用 odfdo 加载，**结构性操作全部走 lxml 层（取底层元素用 `H.xml_of(el)`）**——odfdo 包装 API 有多个坑，动手前必读 `references/gotchas.md`。
 
 样式别靠肉眼判断，先解析：
 
@@ -50,12 +50,13 @@ import odthelper as H
 
 doc = H.load("文件.odt")
 el = doc.body.children[12]
-H.set_el_text(el, "新标题")
+H.replace_text(el, "旧措辞", "新措辞")
 H.insert_after(el, H.make_p("TBMCode", "soffice --headless"))
 doc.save("新文件.odt")
 ```
 
-- `set_el_text(el, s)` — 只用于**叶子**标题/段落。不要用 odfdo 的 `text_content` setter。禁止对 `text:list-item` 调用（会抛 `ValueError`）：它会删掉下级 list。改编号条目的说明文字用 `set_item_label`。
+- `replace_text(el, old, new, expect=1)` — 改已有文字的首选：只动文字槽，span、书签、`text:soft-page-break` 全部保留，命中数不等于 `expect` 就抛异常。
+- `set_el_text(el, s)` — 只用于**叶子**标题/段落（它会把段内结构抹平）。不要用 odfdo 的 `text_content` setter。禁止对 `text:list-item` 调用（会抛 `ValueError`）：它会删掉下级 list。改编号条目的说明文字用 `set_item_label`。
 - `make_p(style, text, span=None)` — 造段落。`\n`→line-break、`\t`→tab、**连续空格必须编码为 " "+`<text:s text:c="n-1"/>`**（ODF 会折叠字面空格串）。原文若用 span 包等宽内容，把那个 span 的样式名传进去。
 - `insert_after/insert_before(el, new)` — 基于 `xmlposition=NEXT_SIBLING/PREV_SIBLING`，参照物是调用者自身。
 - `make_h(level, text, style)` — odfdo 的 `Header` 会丢 style，这个助手补回来。
@@ -66,6 +67,8 @@ doc.save("新文件.odt")
 规则：
 
 - 每类修改加断言（命中数 == 预期值）；保存为**新版本文件**（vN+1），不覆盖原文件。
+- 版本号常常不止写在文件名里，`meta.xml` 的 `dc:title` 里也有一份。出新版两处一起改：`doc.meta.set_title(...)`、`doc.meta.set_modification_date(...)`。
+- 一轮改动做完再刷新目录。LibreOffice 重存会重命名自动样式，之后再按样式名打补丁就对不上了；宁可回到上一版把改动一次做完。
 - 含脚注的段落不要动 `text:note` 子树，除非目标就是脚注本身。
 - **新列表：deepcopy 文档里已有的同结构块**，改文字，不要从零拼 XML。点的形状由嵌套深度决定，见 gotchas「列表」。
 - 标题里的 `3.2` 这类编号常常是**字面文本**，不是自动编号。插入或删除一节后，必须改后续标题，并全文搜「见 3.2」一类交叉引用。
@@ -84,6 +87,7 @@ python3 <本技能目录>/scripts/check_odt.py 新文件.odt [--forbidden 词1,�
 python3 <本技能目录>/scripts/odt_styles.py 新文件.odt --warn-only
 python3 <本技能目录>/scripts/check_odt.py 新文件.odt --font-audit          # 只看 XML，很快
 python3 <本技能目录>/scripts/check_odt.py 新文件.odt --font-audit --render # 还要核对渲染
+python3 <本技能目录>/scripts/check_odt.py 新文件.odt --toc-pages           # 目录页码 vs 渲染分页
 ```
 
 **为什么必须有这一项**：zip、目录、章节号全过，样式仍可能整段失效。
@@ -110,7 +114,13 @@ bash <本技能目录>/scripts/render.sh 新文件.odt --refresh-toc  # 刷新�
 （`TBMCode` → `P123` 之类），之后按样式名做的任何处理都会失效。文档没有 TOC 字段时，
 刷新是空操作，回写纯属风险。只有确实需要刷新目录字段时才加 `--refresh-toc`。
 
-逐页目检**被修改的页 + 抽查未修改的页**。同一 profile 的 soffice 不能并行（容器内已用独立 profile 规避）。
+每次运行都会打印 `PDF: 重新转换` 或 `PDF: 复用…`：改完文档却看到「复用」，说明容器时钟有偏差，加 `--force`。刷新目录后 `check_odt.py --toc-pages` 仍报漂移时，按 gotchas「目录页码可能不收敛」回填数字。
+
+逐页目检**被修改的页 + 抽查未修改的页**。同一 profile 的 soffice 不能并行（容器内已用独立 profile 规避）。逐页比对渲染图能一次点出所有实际变化页：
+
+```bash
+for f in $OLD/pages/*.png; do cmp -s "$f" "$NEW/pages/$(basename "$f")" || echo "DIFF $(basename "$f")"; done
+```
 
 光看 XML 判断不了渲染结果。字体被替换、底色少一行、同一行里混两种字体——查渲染产物：
 

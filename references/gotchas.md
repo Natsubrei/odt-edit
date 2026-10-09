@@ -11,6 +11,11 @@
 7. **保存前 LibreOffice 会重编号自动样式**（P12→P10 之类）。不要对保存后的文件硬编码样式名做二次处理；比对样式用 styles.xml 的**样式名集合**，不比个数以外的细节。
 8. **现成 `Heading_20_2` 常把「5.」和后面的字拆在不同 span 里。** 改标题用 `set_el_text` 整段换成纯文本即可，不必保留那些 span。
 9. **章节号是死文字。** `3.2 安装` 不会因插入新节自动变成 `3.3`。插入/删除带数字的小节后：改后续标题，并搜「见 3.2」「（见3.」这类交叉引用。
+10. **`el.iter()` 会把元素自己也吐出来。** 遍历文字槽时若再手动拼上 `[el] + list(el.iter())`，根节点的 `.text` 会被数两遍，命中计数翻倍。`H.replace_text` 已按「首个节点只取 .text」处理。
+11. **lxml 代理对象的 `id()` 不能当身份用。** 同一个节点每次从 Python 访问可能拿到新的代理对象，`id(p) in set` 会稳定误判。要按文档顺序或文本内容比较。
+12. **`doc.body.children[i]` 是 odfdo 包装对象**，没有 `.get()` / `.find()` 这些 lxml 方法。取底层元素统一用 `H.xml_of(el)`，不要猜 `_xml_element`——`doc.meta` 这类对象就没有这个属性。
+13. **改已有文字用 `H.replace_text(el, old, new, expect=1)`**，别用 `set_el_text` 整段重写：后者会丢掉 span、书签和 `text:soft-page-break`。`replace_text` 命中数不符直接抛异常，等于自带断言。
+14. **改文档属性走 odfdo 的 mixin**：`doc.meta.set_title(...)`、`doc.meta.set_modification_date(datetime)`。没有 `_xml_element`，也没有 `find()`。
 
 ## 标准助手（import，不要复制）
 
@@ -142,3 +147,36 @@ LibreOffice 静默回落到默认样式。`odt_styles.py --warn-only` 会列出�
 - `render.sh` 的 poppler 步骤（pdftotext/pdftoppm/pdfinfo）在宿主缺失时会自动进容器；
   以前宿主没装 poppler 时这一步会静默失败。
 - 背景色、字号、同一行是否混字体，只信 `odt_probe.py` 的结果，不要靠肉眼。
+
+## 渲染产物的新鲜度
+
+`render.sh` 只在**源文件比 PDF 新**（或加了 `--force`）时才重新转换。以前它只判断
+`render.pdf` 存不存在，于是「改完 → render.sh → 目检」这条链会静默复用旧 PDF，
+验证全部作废，而且看不出来。现在每次都会打印走的是哪个分支：
+
+- `PDF: 重新转换` —— 这次渲染可信。
+- `PDF: 复用 ...（源文件没有更新）` —— 内容与上次一致，可信。
+- 改完文档却看到「复用」，说明容器时钟有偏差，加 `--force` 重来。
+
+## 目录页码可能不收敛
+
+`--refresh-toc` 让 LibreOffice 自己算页码，但它算的是**会话内**版式；同一份文件冷加载
+（`--convert-to pdf`）可能多出一页，于是刷新出来的数字整体偏一页，反复刷新也不收敛。
+
+判定以渲染产物为准：`check_odt.py 文件.odt --toc-pages`（需要 render.txt）按目录顺序
+单向扫描，报出漂移条目。不收敛时直接把 `render.txt` 里的真实页码回填进目录字段的数字
+（`text:table-of-content` 里 `text:a` 中 `text:tab` 之后的那段文字），位数不变就不会回流。
+
+## 定性排版缺陷：先看渲染，再下结论
+
+- **段落级样式扫描会把「标签加粗」误判成孤例。** 一组条目里 `(1)功能：…`、`(3)命名规则：…`
+  是普通段落 + span 包住标签，`(4)示例：` 是整段加粗——三者渲染效果一样。只看段落的
+  `fo:font-weight` 会把最后一种报成异常，改完反而破坏一致性。要比对**渲染后**的粗体范围。
+- **高亮错位发生在 span 边界，不在段落上。** 一条路径被切成 5～6 个相邻同色 span、
+  或色块把相邻空格也涂进去，视觉上就是断块和偏移。修法：合并相邻且签名
+  （底色/字体/字号/字重/字色）完全相同的 span，再把首尾空白挪到 span 外。
+  合并前必须解析继承后的属性：`color: None` 与 `color: #000000` 是同一个视觉效果，
+  而 `#a31515` 与 `#e21f1f` 不是。
+- **`odt_styles.py` 的 `props_of` 现在也会读 text 样式的 `fo:background-color`。**
+  以前只读段落属性，导致 `check_odt --render` 的底色核对永远报「没有声明底色」，
+  几十个真实色块一个都看不见。

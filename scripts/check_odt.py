@@ -155,6 +155,57 @@ def audit_render(path, problems):
             problems.append("样式声明了底色 %s，但渲染页里找不到：底色没生效" % hexv)
 
 
+def audit_toc_pages(path, problems):
+    """核对目录字段里缓存的页码与渲染分页是否一致。需要先跑 render.sh。
+
+    目录是字段，页码是上次刷新时写死的文本；正文加几行就会让后面章节整体挪一页，
+    而目录数字不变。`--refresh-toc` 也不一定收敛：LibreOffice 会话内算的版式
+    可能与冷加载差一页，所以这里以渲染产物为准。
+    """
+    import odt_probe as P
+
+    txt = os.path.join(P.out_dir(path), "render.txt")
+    if not os.path.isfile(txt):
+        problems.append("--toc-pages 需要先跑 render.sh（找不到 %s）" % txt)
+        return
+    pages = open(txt, encoding="utf-8", errors="replace").read().split("\f")
+    entry_re = re.compile(r"^(.+?)\.{6,}(\d+)\s*$")
+    norm = lambda s: re.sub(r"\s+", "", s)
+
+    toc_idx = [i for i, p in enumerate(pages)
+               if sum(1 for l in p.splitlines() if entry_re.match(l.strip())) >= 3]
+    if not toc_idx:
+        print("toc-pages: 渲染里没找到目录页，跳过")
+        return
+    entries = []
+    for i in toc_idx:
+        for line in pages[i].splitlines():
+            m = entry_re.match(line.strip())
+            if m:
+                entries.append((m.group(1).strip(), int(m.group(2))))
+
+    cursor = max(toc_idx) + 1
+    bad = []
+    for name, num in entries:
+        key = norm(name)
+        found = None
+        for i in range(cursor, len(pages)):
+            if any(norm(l) == key for l in pages[i].splitlines() if l.strip()):
+                found = i
+                break
+        if found is None or found + 1 != num:
+            bad.append((name, num, found + 1 if found is not None else None))
+        else:
+            cursor = found   # 目录顺序即正文顺序，单向扫描可避开重名的列表项
+    print("toc-pages: 目录 %d 条（占第 1-%d 页），与渲染分页不符 %d 条"
+          % (len(entries), max(toc_idx) + 1, len(bad)))
+    if bad:
+        detail = "; ".join("「%s」标 %s 实 %s" % (n, a, b) for n, a, b in bad[:8])
+        more = "；另有 %d 条" % (len(bad) - 8) if len(bad) > 8 else ""
+        problems.append("目录页码漂移 %d/%d 条：%s%s。跑 render.sh --refresh-toc，"
+                        "不收敛时按渲染分页回填目录字段里的数字" % (len(bad), len(entries), detail, more))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("path")
@@ -166,6 +217,8 @@ def main():
                     help="检查样式是否真正生效（未定义样式 / 继承断裂）")
     ap.add_argument("--render", action="store_true",
                     help="另外核对渲染产物：等宽字体数、同族字号、近色、声明的底色")
+    ap.add_argument("--toc-pages", action="store_true",
+                    help="核对目录里缓存的页码与渲染分页是否一致（需先跑 render.sh）")
     args = ap.parse_args()
     path = args.path
     forbidden = [w for w in args.forbidden.split(",") if w]
@@ -284,6 +337,8 @@ def main():
         audit_styles(path, problems)
     if args.render:
         audit_render(path, problems)
+    if args.toc_pages:
+        audit_toc_pages(path, problems)
 
     print("meta title:", doc.meta.get_title())
     if problems:

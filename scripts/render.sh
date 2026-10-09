@@ -5,7 +5,7 @@
 # 回写会让 LibreOffice 重存文档并重命名全部自动样式（TBMCode -> P123 之类），
 # 之后按样式名做的处理会全部失效，所以默认不开。
 #
-# 用法: render.sh 文件.odt [--refresh-toc] [页码...]
+# 用法: render.sh 文件.odt [--refresh-toc] [--force] [页码...]
 # 输出: $ODT_EDIT_WORK/<文件名去扩展>/render.pdf
 #                                  /render.txt
 #                                  /pages/p-NN.png
@@ -13,10 +13,12 @@
 set -e
 
 REFRESH=0
+FORCE=0
 ARGS=()
 for a in "$@"; do
   case "$a" in
     --refresh-toc) REFRESH=1 ;;
+    --force) FORCE=1 ;;
     *) ARGS+=("$a") ;;
   esac
 done
@@ -25,7 +27,7 @@ set -- "${ARGS[@]+"${ARGS[@]}"}"
 ODT="$1"; shift || true
 PAGES="$*"
 if [ -z "$ODT" ] || [ ! -f "$ODT" ]; then
-  echo "usage: render.sh file.odt [--refresh-toc] [page...]" >&2
+  echo "usage: render.sh file.odt [--refresh-toc] [--force] [page...]" >&2
   exit 2
 fi
 
@@ -128,6 +130,20 @@ else
 fi
 
 if [ ! -f "$WORK/render.pdf" ]; then
+  NEEDS=1
+elif [ "$FORCE" = "1" ]; then
+  NEEDS=1
+  echo "PDF: --force，重新转换"
+elif [ "$ODT" -nt "$WORK/render.pdf" ]; then
+  NEEDS=1
+else
+  NEEDS=0
+fi
+
+if [ "$NEEDS" = "1" ]; then
+  # 源文件比 PDF 新（或显式 --force）就必须重转。
+  # 曾经这里只判断“PDF 是否存在”，改完文档再跑会静默复用旧 PDF，验证全部作废。
+  echo "PDF: 重新转换"
   if use_docker; then
     convert_with_docker
   else
@@ -140,6 +156,8 @@ if [ ! -f "$WORK/render.pdf" ]; then
     PDF_SRC="$WORK/${STEM}.pdf"
     [ "$PDF_SRC" != "$WORK/render.pdf" ] && mv -f "$PDF_SRC" "$WORK/render.pdf"
   fi
+else
+  echo "PDF: 复用 $WORK/render.pdf（源文件没有更新；要看新改动请加 --force）"
 fi
 
 render_from_pdf

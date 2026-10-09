@@ -4,6 +4,7 @@ import os, zipfile, io
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(os.path.dirname(HERE), "examples")
+FIXED_DATE = (2024, 1, 1, 0, 0, 0)
 
 CONTENT = """<?xml version="1.0" encoding="UTF-8"?>
 <office:document-content
@@ -70,11 +71,16 @@ def write_odt(path, title, body):
     with zipfile.ZipFile(buf, "w") as z:
         zi = zipfile.ZipInfo("mimetype")
         zi.compress_type = zipfile.ZIP_STORED
+        zi.date_time = FIXED_DATE
         z.writestr(zi, "application/vnd.oasis.opendocument.text")
-        z.writestr("META-INF/manifest.xml", MANIFEST)
-        z.writestr("content.xml", CONTENT.format(body=body))
-        z.writestr("styles.xml", STYLES)
-        z.writestr("meta.xml", META.format(title=title))
+        for name, data in (("META-INF/manifest.xml", MANIFEST),
+                           ("content.xml", CONTENT.format(body=body)),
+                           ("styles.xml", STYLES),
+                           ("meta.xml", META.format(title=title))):
+            # 固定 date_time：否则每次跑 selftest 都用当前时间，examples/*.odt 平白变成“已修改”
+            info = zipfile.ZipInfo(name)
+            info.date_time = FIXED_DATE
+            z.writestr(info, data)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as f:
         f.write(buf.getvalue())

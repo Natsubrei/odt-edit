@@ -289,6 +289,12 @@ def cmd_bg(odt, page, x, y0, y1):
 
 def cmd_crop(odt, page, x0, y0, x1, y1, scale):
     w, h, ch, px = png_load(page_png(odt, page))
+    if x0 >= x1 or y0 >= y1:
+        # --crop 是 X0 Y0 X1 Y1（对角两点），不是 X Y W H。传错的典型症状是这里崩。
+        sys.exit("--crop 要的是对角两点 X0 Y0 X1 Y1，且 X1>X0、Y1>Y0。"
+                 "收到 %d %d %d %d（图片 %dx%d）" % (x0, y0, x1, y1, w, h))
+    if x0 < 0 or y0 < 0:
+        sys.exit("--crop 的 X0/Y0 不能为负（收到 %d %d）" % (x0, y0))
     x1 = min(x1, w)
     y1 = min(y1, h)
     rows = []

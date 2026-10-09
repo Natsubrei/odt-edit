@@ -23,7 +23,7 @@ Inspect structure first:
 python3 <skill-dir>/scripts/outline.py file.odt
 ```
 
-It prints body-child indexes, headings, list nesting, and style names. Run it before changing lists or inserting a section. Load with odfdo; **do all structural work on `el._xml_element` (lxml)**. Read `references/gotchas.md` before coding.
+It prints body-child indexes, headings, list nesting, and style names. Run it before changing lists or inserting a section. Load with odfdo; **do all structural work on the lxml layer (`H.xml_of(el)`)**. Read `references/gotchas.md` before coding.
 
 Never judge styles by eye. Resolve them:
 
@@ -50,12 +50,13 @@ import odthelper as H
 
 doc = H.load("file.odt")
 el = doc.body.children[12]
-H.set_el_text(el, "new heading")
+H.replace_text(el, "old wording", "new wording")
 H.insert_after(el, H.make_p("TBMCode", "soffice --headless"))
 doc.save("new.odt")
 ```
 
-- `set_el_text(el, s)` — leaf heading/paragraph only. Do not use odfdo `text_content`. **Raises ValueError on `text:list-item`** (it deletes nested lists). Use `set_item_label` for a numbered item.
+- `replace_text(el, old, new, expect=1)` — the default for editing existing text: it only touches text slots, so spans, bookmarks and `text:soft-page-break` survive. Raises when the hit count differs from `expect`.
+- `set_el_text(el, s)` — leaf heading/paragraph only (it flattens the paragraph's structure). Do not use odfdo `text_content`. **Raises ValueError on `text:list-item`** (it deletes nested lists). Use `set_item_label` for a numbered item.
 - `make_p(style, text, span=None)` — `\n`→line-break, `\t`→tab, consecutive spaces as `" "` + `<text:s text:c="n-1"/>`. If the original wraps monospaced text in a span, pass that span style name.
 - `insert_after` / `insert_before` — `xmlposition=NEXT_SIBLING/PREV_SIBLING`, relative to the caller.
 - `make_h(level, text, style)` — odfdo `Header` drops the style; this puts it back.
@@ -66,6 +67,8 @@ Semantics and limits of each helper: see the table in `references/gotchas.md`.
 Rules:
 
 - Assert hit counts per change class. Save as **vN+1**, do not overwrite the original.
+- A version number often sits in two places: the file name and `dc:title` in `meta.xml`. Update both: `doc.meta.set_title(...)`, `doc.meta.set_modification_date(...)`.
+- Finish every edit before refreshing the TOC. A LibreOffice re-save renames automatic styles, so patches keyed on style names stop matching afterwards.
 - Do not touch a `text:note` subtree unless the footnote itself is the target.
 - **New lists: deepcopy an existing same-shape block** and change the strings. Bullet glyphs follow nesting depth (see gotchas “Lists”).
 - Numbers like `3.2` in headings are often **literal text**, not automatic numbering. After insert/delete, retitle later headings and search cross-references such as “see 3.2”.
@@ -84,6 +87,7 @@ Style diagnosis (mandatory once you touched styles; non-zero exit means undefine
 python3 <skill-dir>/scripts/odt_styles.py new.odt --warn-only
 python3 <skill-dir>/scripts/check_odt.py new.odt --font-audit           # XML only, fast
 python3 <skill-dir>/scripts/check_odt.py new.odt --font-audit --render  # also check the render
+python3 <skill-dir>/scripts/check_odt.py new.odt --toc-pages            # TOC numbers vs real pagination
 ```
 
 **Why this matters:** zip, TOC, and chapter numbering can all pass while styles are entirely
@@ -110,6 +114,11 @@ Per-document directories, so versions never clobber each other.
 
 **Why no write-back by default:** writing back makes LibreOffice re-save the document and rename
 every automatic style (`TBMCode` → `P123`). Any later work keyed on style names then breaks.
+
+Each run prints either `PDF: 重新转换` (re-converted) or `PDF: 复用` (reused). If you edited the
+document and see `复用`, the container clock is off: pass `--force`. When `--toc-pages` still
+reports drift after a refresh, write the real page numbers into the TOC field (see gotchas
+“目录页码可能不收敛”).
 When the document has no TOC field the refresh is a no-op, so the write-back is pure risk.
 
 Inspect **changed pages plus a sample of unchanged pages**.
