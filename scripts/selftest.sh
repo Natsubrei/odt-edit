@@ -18,6 +18,8 @@ test -s "$DIFF"
 python3 "$HERE/diff_odt.py" "$ROOT/examples/leaf.odt" "$ROOT/examples/nested-list.odt" "$DIFF" --styles
 test -s "$DIFF"
 grep -q "样式" "$DIFF"
+grep -q "变更性质" "$DIFF"
+grep -q "样式属性变化" "$DIFF"
 rm -f "$DIFF"
 
 # 样式解析：正常文档不应报继承风险，也不应报未定义样式
@@ -164,6 +166,10 @@ if python3 "$HERE/odt_probe.py" "$ROOT/examples/leaf.odt" --pages 2>/dev/null; t
   echo "expected odt_probe --pages to fail without a render" >&2
   exit 1
 fi
+if python3 "$HERE/odt_probe.py" "$ROOT/examples/leaf.odt" --find x 2>/dev/null; then
+  echo "expected odt_probe --find to fail without a render" >&2
+  exit 1
+fi
 
 # --blocks：切开默认只警告（退出 0）；--blocks-fail 才当错误
 BLK="$ROOT/examples/split-block.odt"
@@ -177,6 +183,20 @@ if python3 "$HERE/check_odt.py" "$BLK" --blocks-fail >/tmp/_blkf.txt 2>&1; then
   exit 1
 fi
 grep -q "切开" /tmp/_blkf.txt
+# --blocks-summary：只印摘要与告警，不逐条列块
+if python3 "$HERE/check_odt.py" "$BLK" --blocks-summary >/tmp/_blks.txt 2>&1; then
+  :
+else
+  echo "--blocks-summary 默认不应失败" >&2; cat /tmp/_blks.txt >&2; exit 1
+fi
+grep -q "切开" /tmp/_blks.txt
+grep -q "^blocks:" /tmp/_blks.txt
+if grep -q "^    " /tmp/_blks.txt; then
+  echo "--blocks-summary 仍然逐条列块" >&2; exit 1
+fi
+if [ "$(wc -l < /tmp/_blks.txt)" -ge "$(wc -l < /tmp/_blk.txt)" ]; then
+  echo "--blocks-summary 没变短" >&2; exit 1
+fi
 # 没被切开的文档不应报切开
 if python3 "$HERE/check_odt.py" "$ROOT/examples/leaf.odt" --blocks 2>/dev/null | grep -q "切开"; then
   echo "--blocks 误报：leaf.odt 没有等宽块" >&2
@@ -235,6 +255,19 @@ row2 = H.clone_row(p, "y")
 assert H.leading_spaces(row2) == 5, H.leading_spaces(row2)
 assert "".join(row2.itertext()) == "y"
 print("clone_row / leading_spaces OK")
+
+# drop_row：删中间行不影响末行样式；删末行时 *End 样式必须移交给新末行
+body = etree.Element(q("text"))
+p1 = etree.SubElement(body, q("p")); p1.set(H.A_STYLE, "TBMFile"); p1.text = "a"
+p2 = etree.SubElement(body, q("p")); p2.set(H.A_STYLE, "TBMFile"); p2.text = "b"
+p3 = etree.SubElement(body, q("p")); p3.set(H.A_STYLE, "TBMFileEnd"); p3.text = "c"
+assert H.drop_row(p2) is p1
+assert p3.get(H.A_STYLE) == "TBMFileEnd", "删中间行不该动 End 样式"
+assert H.drop_row(p3) is p1
+assert p1.get(H.A_STYLE) == "TBMFileEnd", \
+    "删末行后 End 样式没移交：%s" % p1.get(H.A_STYLE)
+assert "".join(body.itertext()) == "a", "drop_row 没真删"
+print("drop_row OK")
 PY
 
 echo SELFTEST_OK

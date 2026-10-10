@@ -63,6 +63,7 @@ doc.save("新文件.odt")
 - `clone_row(tpl, text, indent=None)` — 以已有段落为模板造一行，段落样式跟着模板。**往文件内容块或文本框里追行时用它**：模板末行常被拆成多个 span，只替换首个 span 的写法会残留旧文字（`… : true false`）。`indent=None` 沿用模板的前导缩进。
 - `leading_spaces(el)` — 段落的前导空格数，`<text:s text:c="n"/>` 按 n 展开。**量缩进必须用它**：`itertext()` 与 `text_recursive` 都不展开 `text:s`，结果恒为 0。
 - `clear_content(el)` — 清空内容（子节点 + `.text`），保留属性（样式名等）。
+- `drop_row(el)` — 删掉一行段落。**被删行带 `*End` 段落样式时，把样式移交给新的末行**（否则块少一条收边）。
 
 各函数的语义与限制见 `references/gotchas.md` 的对照表。
 - 清批注：遍历 `//office:annotation` 与 `//office:annotation-end` 逐个 `el.delete()`；批注里的合理建议应落实为正文再删除。
@@ -84,6 +85,8 @@ python3 <本技能目录>/scripts/check_odt.py 新文件.odt [--forbidden 词1,�
 
 必检：zip 完整性、mimetype 须为首位未压缩条目。可选：`--require-toc`、`--require-chapter-seq`、`--forbid-nbsp`。打印标题/表格/图片/批注计数，与修改前基线对照——图片数、表格数无故变化即是事故。相邻重复只提示、不因此失败。
 
+提示类输出（`note:`、`adjacent-repeat hints`）走 stderr，所以 stdout 可以直接 grep：摘要行、`  - ` 失败详情、`PASS`/`FAIL` 都在 stdout。
+
 样式诊断（动过样式就必跑，退出码非 0 表示有未定义样式或继承断裂）：
 
 ```bash
@@ -98,16 +101,25 @@ python3 <本技能目录>/scripts/check_odt.py 新文件.odt --toc-pages        
 ```bash
 python3 <本技能目录>/scripts/check_odt.py 新文件.odt --blocks
 python3 <本技能目录>/scripts/check_odt.py 新文件.odt --blocks-fail
+python3 <本技能目录>/scripts/check_odt.py 新文件.odt --blocks-summary
 python3 <本技能目录>/scripts/check_odt.py 新文件.odt --prose-space
 python3 <本技能目录>/scripts/check_odt.py 新文件.odt --indent "<name>dfs.blocksize</name>"
 ```
 
 - `--blocks`：列出连续等宽块。切开默认只警告（退出 0）——说明句夹在两个文件块之间常是合法结构。
   要当错误退出加 `--blocks-fail`。编号步骤句（`3. …`、`（3）…`）视为合法分隔，不报。
+- `--blocks-summary`：同上，但只印摘要与告警，不逐条列块（大文档 209 行 → 10 余行）。
+  放进 `round.sh` / CI 用这个。
 - `--prose-space`：正文（非等宽块）里中文贴着英文、或 `/` `$` 贴着中文则失败。配置块不查。
 - `--indent`：打印匹配段落的前导空格数（展开 `text:s`）与样式名，可重复传多个。
   `diff_odt.py`、`odt_text.py`、`render.txt` 都不展开 `text:s`：等宽行的对齐在纯文本层完全看不见，
   改错了也看不出来。
+
+删掉配置行后用 `--forbidden` 断言旧文本确实没了（比翻 diff 直接）：
+
+```bash
+python3 <本技能目录>/scripts/check_odt.py 新文件.odt --forbidden "a1.sinks.k3.indexType,a1.sinks.k3.ttl"
+```
 
 **为什么必须有这一项**：zip、目录、章节号全过，样式仍可能整段失效。
 `check_odt.py` 的其余检查全是结构性和文本性的，一条也发现不了"样式没生效"。
@@ -145,13 +157,18 @@ for f in $OLD/pages/*.png; do cmp -s "$f" "$NEW/pages/$(basename "$f")" || echo 
 
 ```bash
 python3 <本技能目录>/scripts/odt_probe.py 新文件.odt --fonts
+python3 <本技能目录>/scripts/odt_probe.py 新文件.odt --find "某段文字"          # 先拿坐标
 python3 <本技能目录>/scripts/odt_probe.py 新文件.odt --page-of "某段文字"
 python3 <本技能目录>/scripts/odt_probe.py 新文件.odt --bg 700 100 600 --page 11
 python3 <本技能目录>/scripts/odt_probe.py 新文件.odt --crop 85 470 330 500 --scale 4 --page 11
 ```
 
 - `--fonts`：PDF 里实际用到的 (字体, 字号, 颜色) 及字符数。**同一行内出现两个等宽字体编号 = 有片段掉回正文样式**。
+- `--find`：文字的**页 + 像素坐标**（`--crop` / `--bg` 要的就是这两个值）。**不要猜坐标**：
+  先 `--find` 拿到 `x` `y`，再决定 `--bg x y0 y1` 或 `--crop x0 y0 x1 y1`。
+  加 `--quiet` 输出 `页 x y 高`（一行一个），便于管道。
 - `--bg`：某列像素的背景色连续段。验证底色有没有盖满整块（"灰底少一行"就是这么查出来的）。
+  图例走 stderr，所以 stdout 可以直接 `grep -c WHITE` 数断带；`--quiet` 输出 `色值 y0 y1`。
 - `--crop`：裁剪放大成 PNG，看字形。判断"是不是两种字体"时放大 4 倍最直观。
 - `--page-of`：文字在第几页，不靠文件名猜。加 `--quiet` 只输出页码（一行一个），便于管道解析。
 

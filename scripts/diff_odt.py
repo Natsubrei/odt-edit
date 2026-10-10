@@ -48,6 +48,43 @@ def style_lines(odt):
     return out
 
 
+def style_counts(odt):
+    """{(族, 属性单元格, 样式名, 单位): 计数}。属性变了名字或键就变。"""
+    a = odt_styles.analyse(odt)
+    out = {}
+    for fam, key in (("paragraph", "paragraphs"), ("text", "texts")):
+        keys = [k for k, _ in (odt_styles.PARA_KEYS if fam == "paragraph"
+                               else odt_styles.TEXT_KEYS)]
+        unit = "段" if fam == "paragraph" else "处"
+        for r in a[key]:
+            p = r["actual"]
+            cells = " ".join("%s=%s" % (odt_styles.DISPLAY[k], p.get(k))
+                             for k in keys if p.get(k) is not None)
+            out[(fam, cells, str(r["name"]), unit)] = r["count"]
+    return out
+
+
+def change_kind(old, new):
+    """把样式变化拆成“属性变了”与“只是数量变了”两类。
+
+    为什么：往块里加删行时属性一个没改，只是计数变了（TBMFile 536→533 段），
+    而分组行里带着计数，旧输出会报成样式 hunk +2/-2，看着像样式被改。
+    """
+    o, n = style_counts(old), style_counts(new)
+    only = [k for k in o if k not in n] + [k for k in n if k not in o]
+    cnt = [(k, o[k], n[k]) for k in o if k in n and o[k] != n[k]]
+    parts = ["样式属性变化 %d 项" % len(only)]
+    if only:
+        parts.append("（%s）" % "；".join(k[2] for k in only[:6]))
+    if cnt:
+        d = "；".join("%s %s %d→%d" % (k[2], k[3], a, b) for k, a, b in cnt[:6])
+        more = "；另有 %d 项" % (len(cnt) - 6) if len(cnt) > 6 else ""
+        parts.append("仅计数变化 %d 项（%s%s）" % (len(cnt), d, more))
+    else:
+        parts.append("仅计数变化 0 项")
+    return "；".join(parts), len(only), len(cnt)
+
+
 def main():
     ap = argparse.ArgumentParser(description="ODT 差异报告")
     ap.add_argument("old")
@@ -71,6 +108,8 @@ def main():
     hunk_text = "".join(d)
 
     hunk_style = ""
+    kind = ""
+    kn = kc = 0
     if args.styles:
         sa, sb = style_lines(args.old), style_lines(args.new)
         hunk_style = "".join(difflib.unified_diff(
@@ -78,6 +117,7 @@ def main():
             fromfile="%s (styles)" % os.path.basename(args.old),
             tofile="%s (styles)" % os.path.basename(args.new),
             n=1))
+        kind, kn, kc = change_kind(args.old, args.new)
 
     parent = os.path.dirname(args.out)
     if parent:
@@ -90,6 +130,7 @@ def main():
             if not hunk_style.strip():
                 f.write("（样式无差异）\n")
             f.write(hunk_style)
+            f.write("\n== 变更性质 ==\n%s\n" % kind)
 
     def stat(s):
         return (sum(1 for l in s.splitlines() if l.startswith("@@")),
@@ -102,7 +143,8 @@ def main():
     msg = "%s: 正文 %d hunks, +%d/-%d" % (args.out, h, p, m)
     if args.styles:
         sh, sp, sm = stat(hunk_style)
-        msg += " | 样式 %d hunks, +%d/-%d" % (sh, sp, sm)
+        msg += " | 样式 %d hunks, +%d/-%d（属性变化 %d 项，仅计数 %d 项）" \
+               % (sh, sp, sm, kn, kc)
     print(msg)
 
 

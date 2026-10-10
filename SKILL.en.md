@@ -63,6 +63,7 @@ doc.save("new.odt")
 - `clone_row(tpl, text, indent=None)` — build a line from an existing paragraph as template (the paragraph style follows the template). **Use it when appending rows to a file-content block or text box**: the template's last line is often split across several spans, and helpers that replace only the first span leave the old text behind (`… : true false`). `indent=None` keeps the template's indent.
 - `leading_spaces(el)` — leading spaces, `<text:s text:c="n"/>` expanded. **Always use it to measure indent**: neither `itertext()` nor `text_recursive` expands `text:s`, so they always read 0.
 - `clear_content(el)` — drop children and `.text`, keep attributes (style name).
+- `drop_row(el)` — delete one row paragraph. **If the removed row carries a `*End` paragraph style, the style moves to the new last row** (otherwise the block loses its closing edge).
 
 Semantics and limits of each helper: see the table in `references/gotchas.md`.
 - Remove comments: delete `//office:annotation` and `//office:annotation-end`. Apply useful comment text to the body first.
@@ -84,6 +85,8 @@ python3 <skill-dir>/scripts/check_odt.py new.odt [--forbidden w1,w2]
 
 Always: zip integrity and mimetype (must be first, uncompressed). Optional: `--require-toc`, `--require-chapter-seq`, `--forbid-nbsp`. Compare table/image counts with the pre-edit baseline.
 
+Advisory output (`note:`, `adjacent-repeat hints`) goes to stderr, so stdout stays greppable: summary lines, `  - ` failure details, `PASS`/`FAIL`.
+
 Style diagnosis (mandatory once you touched styles; non-zero exit means undefined styles or broken inheritance):
 
 ```bash
@@ -98,6 +101,7 @@ Block structure and alignment (invisible to plain text extraction; run it after 
 ```bash
 python3 <skill-dir>/scripts/check_odt.py new.odt --blocks
 python3 <skill-dir>/scripts/check_odt.py new.odt --blocks-fail
+python3 <skill-dir>/scripts/check_odt.py new.odt --blocks-summary
 python3 <skill-dir>/scripts/check_odt.py new.odt --prose-space
 python3 <skill-dir>/scripts/check_odt.py new.odt --indent "<name>dfs.blocksize</name>"
 ```
@@ -105,8 +109,16 @@ python3 <skill-dir>/scripts/check_odt.py new.odt --indent "<name>dfs.blocksize</
 - `--blocks`: lists contiguous monospaced blocks. Splits are **notes** (exit 0) by default — a lead-in
   sentence between two file snippets is often legitimate. Pass `--blocks-fail` to treat splits as errors.
   Numbered step lines (`3. …`, `（3）…`) count as legitimate separators and are not reported.
+- `--blocks-summary`: same, but prints only the summary and the warnings (209 lines → ~10 on a big doc).
+  Use this one in `round.sh` / CI.
 - `--prose-space`: fail if body text (not monospaced blocks) has CJK stuck to Latin, or `/` `$` stuck to CJK.
 - `--indent`: leading spaces (with `text:s` expanded) and style name per matching paragraph; repeatable.
+
+After deleting config rows, assert the old text is gone with `--forbidden`:
+
+```bash
+python3 <skill-dir>/scripts/check_odt.py new.odt --forbidden "a1.sinks.k3.indexType,a1.sinks.k3.ttl"
+```
 
 **Why this matters:** zip, TOC, and chapter numbering can all pass while styles are entirely
 ineffective. Every other `check_odt.py` check is structural or textual and cannot detect it.
@@ -146,10 +158,14 @@ two fonts inside one line — check the render output:
 
 ```bash
 python3 <skill-dir>/scripts/odt_probe.py new.odt --fonts
+python3 <skill-dir>/scripts/odt_probe.py new.odt --find "some text"     # locate first
 python3 <skill-dir>/scripts/odt_probe.py new.odt --page-of "some text"
 python3 <skill-dir>/scripts/odt_probe.py new.odt --bg 700 100 600 --page 11
 python3 <skill-dir>/scripts/odt_probe.py new.odt --crop 85 470 330 500 --scale 4 --page 11
 ```
+
+- `--find`: the **page plus pixel coordinates** of a string — exactly what `--crop` / `--bg` need.
+  Do not guess coordinates. `--quiet` prints `page x y height`, one per line.
 
 - `--fonts`: (family, size, colour) actually used in the PDF, with character counts.
   **Two monospace font ids inside one line means a fragment fell back to body style.**

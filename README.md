@@ -34,15 +34,16 @@ ODT_EDIT_BUILD_IMAGE=1 bash scripts/setup_env.sh
 | `scripts/check_odt.py` | Zip/mimetype always; TOC/chapter/NBSP, style resolution, block structure, indent |
 | `scripts/odthelper.py` | Importable edit helpers (`set_el_text`, `make_p`, `clone_row`, `leading_spaces`, …) |
 | `scripts/odt_styles.py` | Resolve effective style properties; flag broken inheritance |
-| `scripts/diff_odt.py` | Body diff; `--styles` adds a style-property diff |
+| `scripts/diff_odt.py` | Body diff; `--styles` adds a style-property diff, split into real property changes vs count-only changes |
 | `scripts/odt_text.py` | Extract body text; `out` optional (stdout); `--keep-blanks` keeps empty paragraphs |
 | `scripts/render.sh` | Read-only PDF + PNG + `render.txt`/`render.layout.txt`; `--refresh-toc` writes back |
-| `scripts/odt_probe.py` | Inspect the render: fonts, background runs, zoomed crops, `--page-of --quiet` |
+| `scripts/odt_probe.py` | Inspect the render: fonts, `--find` (page + pixel coords), background runs, zoomed crops |
 | `scripts/make_examples.py` | Write `examples/*.odt` fixtures |
 
 `check_odt.py` flags: `--require-toc` `--require-chapter-seq` `--forbid-nbsp` `--forbidden a,b`
 `--font-audit` (undefined styles / broken inheritance) `--blocks` (list blocks; splits are notes)
-`--blocks-fail` (splits are errors) `--prose-space` (CJK stuck to Latin or `/` `$`)
+`--blocks-fail` (splits are errors) `--blocks-summary` (summary only, for loops/CI)
+`--prose-space` (CJK stuck to Latin or `/` `$`)
 `--indent TEXT` (leading spaces, `text:s` expanded) `--render` (also check the render output)
 `--toc-pages` (TOC numbers vs render pagination).
 

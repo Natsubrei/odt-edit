@@ -170,6 +170,26 @@ def clone_row(tpl, text, indent=None):
     return x
 
 
+def drop_row(el):
+    """删掉一行段落；若它带着 *End 段落样式，把该样式移交给新的末行。
+
+    为什么：块末行用哨兵样式（如 TBMFileEnd）标明“块结束”，那个样式带下边框。
+    删掉末行后若不搬走样式，块就以普通行结尾，渲染上少一条收边。
+    删中间行时不会命中，直接删掉。返回新的前一行（没有则 None）。
+    """
+    x = xml_of(el)
+    parent = x.getparent()
+    if parent is None:
+        raise ValueError("drop_row 的元素不在树里")
+    style = x.get(A_STYLE) or ""
+    prev = x.getprevious()
+    parent.remove(x)
+    if style.endswith("End") and prev is not None and prev.tag == x.tag:
+        if (prev.get(A_STYLE) or "") == style[:-3]:
+            prev.set(A_STYLE, style)
+    return prev
+
+
 def make_p(style, text, span=None):
     """造段落：\\n→line-break，\\t→tab，连续空格→" "+text:s。
 

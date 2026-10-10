@@ -173,6 +173,96 @@ def cmd_page_of(odt, needle, quiet=False):
                     break
 
 
+def png_size(path):
+    """只读 PNG 头拿尺寸，不解码像素。"""
+    with open(path, "rb") as f:
+        head = f.read(24)
+    return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
+
+
+def cmd_find(odt, needle, quiet=False):
+    """找文字在渲染图上的坐标（页 + PNG 像素 x/y/高），供 --crop / --bg 直接使用。
+
+    为什么需要：--page-of 只给页码，而 --crop / --bg 要像素坐标。
+    pdftohtml -xml 的 top/left 是点（pt），渲染 PNG 是 render.sh 的 -r 像素，
+    两者不同。比例从 XML 的 page height 与 PNG 高度现算，改 -r 也不会错。
+    """
+    xml = pdf_html(odt)
+    norm = lambda t: re.sub(r"\s+", " ", t).strip()
+    want = norm(needle)
+    tight = re.sub(r"\s+", "", needle)
+
+    pages = []
+    for m in re.finditer(r"<page\b([^>]*)>(.*?)</page>", xml, re.S):
+        pa = dict(re.findall(r'([\w-]+)="([^"]*)"', m.group(1)))
+        rows = []
+        for t in re.finditer(r"<text\b([^>]*)>(.*?)</text>", m.group(2), re.S):
+            ta = dict(re.findall(r'([\w-]+)="([^"]*)"', t.group(1)))
+            rows.append({
+                "left": float(ta.get("left") or 0),
+                "top": float(ta.get("top") or 0),
+                "width": float(ta.get("width") or 0),
+                "height": float(ta.get("height") or 0),
+                "text": norm(re.sub(r"<[^>]+", "", t.group(2))),
+            })
+        pages.append({"no": int(pa.get("number") or 0),
+                      "pt_h": float(pa.get("height") or 0), "rows": rows})
+
+    hits = []
+    for pg in pages:
+        n = pg["no"]
+        for r in pg["rows"]:
+            if want and want in r["text"]:
+                hits.append((n, r, pg["pt_h"]))
+        if hits and hits[-1][0] == n:
+            continue
+        # 退化：整页拼接后再找（长串会被 pdftohtml 拆成多个 text 节点）
+        joined = re.sub(r"\s+", "", "".join(r["text"] for r in pg["rows"]))
+        if tight and tight in joined:
+            acc = ""
+            for r in pg["rows"]:
+                acc += re.sub(r"\s+", "", r["text"])
+                if len(acc) >= joined.index(tight) + len(tight):
+                    hits.append((n, r, pg["pt_h"]))
+                    break
+
+    if not hits:
+        print("未找到 %r。提示：pdftohtml 与 pdftotext 都会在折行处切开长串，"
+              "先用短一点的片段试。" % needle)
+        return
+
+    # 页码 → 点→像素的比例（PNG 高度 / page height）
+    scales = {}
+    for n, _r, pt_h in hits:
+        if n in scales or not pt_h:
+            continue
+        try:
+            _w, px_h = png_size(page_png(odt, n))
+        except OSError:
+            continue
+        scales[n] = px_h / pt_h
+
+    for n, r, _pt_h in hits:
+        k = scales.get(n)
+        if quiet:
+            if k:
+                print("%d %d %d %d" % (n, round(r["left"] * k),
+                                        round(r["top"] * k),
+                                        round(r["height"] * k)))
+            continue
+        if k:
+            x, y = round(r["left"] * k), round(r["top"] * k)
+            h = max(1, round(r["height"] * k))
+            w = round(r["width"] * k)
+            print("  第 %2d 页  x=%-5d y=%-5d 宽=%-5d 高=%-3d  %s"
+                  % (n, x, y, w, h, r["text"][:56]))
+        else:
+            print("  第 %2d 页  %s（该页没渲染图，先跑 render.sh）" % (n, r["text"][:56]))
+    if not quiet:
+        sys.stderr.write("  --crop/--bg 用上面的 x/y 像素："
+                         "--bg x y0 y1 / --crop x0 y0 x1 y1\n")
+
+
 def cmd_pages(odt):
     d = out_dir(odt)
     pdir = os.path.join(d, "pages")
@@ -270,7 +360,7 @@ def classify(px, kind=None):
     return "COLOR"
 
 
-def cmd_bg(odt, page, x, y0, y1):
+def cmd_bg(odt, page, x, y0, y1, quiet=False):
     w, h, ch, px = png_load(page_png(odt, page))
     if not (0 <= x < w):
         sys.exit("x=%d 超出图片宽度 %d" % (x, w))
@@ -285,11 +375,14 @@ def cmd_bg(odt, page, x, y0, y1):
             runs.append(state)
         else:
             state[2] = y
-    print("# %s  x=%d  y=%d..%d" % (page_png(odt, page), x, y0, y1))
-    print("  色值: WHITE=白底  GRAY=浅灰底  INK=文字  COLOR=彩色")
+    if not quiet:
+        print("# %s  x=%d  y=%d..%d" % (page_png(odt, page), x, y0, y1))
+        # 图例走 stderr：留在 stdout 里会污染 grep（grep -c WHITE 会多算 1）
+        sys.stderr.write("  色值: WHITE=白底  GRAY=浅灰底  INK=文字  COLOR=彩色\n")
     for t, a, b in runs:
         if b - a >= 2:
-            print("  %-6s y=%4d-%4d  高 %d" % (t, a, b, b - a + 1))
+            print("  %-6s y=%4d-%4d  高 %d" % (t, a, b, b - a + 1) if not quiet
+                  else "%s %d %d" % (t, a, b))
 
 
 def cmd_crop(odt, page, x0, y0, x1, y1, scale):
@@ -323,8 +416,9 @@ def main():
     g.add_argument("--bg", nargs=3, metavar=("X", "Y0", "Y1"), help="某列的背景色连续段")
     g.add_argument("--crop", nargs=4, metavar=("X0", "Y0", "X1", "Y1"), help="裁剪放大")
     g.add_argument("--page-of", metavar="文本", help="文字在第几页")
+    g.add_argument("--find", metavar="文本", help="文字的页 + 像素坐标（供 --crop/--bg）")
     ap.add_argument("--quiet", action="store_true",
-                    help="--page-of 只输出页码（一行一个），便于管道解析")
+                    help="只输出机器可读内容（--page-of / --find / --bg）；提示走 stderr")
     g.add_argument("--pages", action="store_true", help="已渲染的页")
     ap.add_argument("--page", type=int, default=1)
     ap.add_argument("--scale", type=int, default=3)
@@ -333,11 +427,13 @@ def main():
     if args.fonts:
         cmd_fonts(args.odt, args.page if args.page > 1 else None)
     elif args.bg:
-        cmd_bg(args.odt, args.page, *(int(v) for v in args.bg))
+        cmd_bg(args.odt, args.page, *(int(v) for v in args.bg), quiet=args.quiet)
     elif args.crop:
         cmd_crop(args.odt, args.page, *(int(v) for v in args.crop), args.scale)
     elif args.page_of:
         cmd_page_of(args.odt, args.page_of, quiet=args.quiet)
+    elif args.find:
+        cmd_find(args.odt, args.find, quiet=args.quiet)
     else:
         cmd_pages(args.odt)
 

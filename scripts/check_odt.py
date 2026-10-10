@@ -2,6 +2,9 @@
 """ODT checks. Always: zip + mimetype.
 Optional: --require-toc --require-chapter-seq --forbid-nbsp --forbidden a,b
           --font-audit              样式是否真正生效（只看 XML，不需要渲染）
+          --blocks [--blocks-fail] [--blocks-summary]   等宽块结构
+          --prose-space             正文里中英文/路径有没有空开
+          --indent 文本             前导空格数（展开 text:s），可重复
           --render                  另外核对渲染产物（需先跑 render.sh）
 Usage: python3 check_odt.py file.odt [flags]
 Exit 0=pass 1=fail.
@@ -206,7 +209,7 @@ def audit_toc_pages(path, problems):
                         "不收敛时按渲染分页回填目录字段里的数字" % (len(bad), len(entries), detail, more))
 
 
-def audit_blocks(path, problems, fail=False):
+def audit_blocks(path, problems, fail=False, summary=False):
     """把正文切成“连续等宽段落块”，报告块被切碎的地方。
 
     等宽行就是命令/文件内容块。块被一个普通段落从中间切开时，渲染上会出现
@@ -261,12 +264,13 @@ def audit_blocks(path, problems, fail=False):
         i = j
 
     print("blocks: %d 个块，%d 行等宽内容" % (len(blocks), sum(b[1] for b in blocks)))
-    last_ch = None
-    for ch, n, first, _idx in blocks:
-        if ch != last_ch:
-            print("  %s" % (ch or "(无章节)"))
-            last_ch = ch
-        print("    %3d 行  %s" % (n, first[:64]))
+    if not summary:
+        last_ch = None
+        for ch, n, first, _idx in blocks:
+            if ch != last_ch:
+                print("  %s" % (ch or "(无章节)"))
+                last_ch = ch
+            print("    %3d 行  %s" % (n, first[:64]))
 
     # 块被单个非等宽行从中间切开。
     # 判据收窄到“两侧块都 >=2 行”：本文档的正常写法是「说明句 + 单条命令」交替，
@@ -293,7 +297,7 @@ def audit_blocks(path, problems, fail=False):
         else:
             print("note:", msg)
     ones = [b for b in blocks if b[1] == 1]
-    if ones:
+    if ones and not summary:
         print("  提示：单行块 %d 个（合法但常是被切断的块），例：%s"
               % (len(ones), "; ".join(b[2][:36] for b in ones[:4])))
 
@@ -385,6 +389,8 @@ def main():
                     help="列出连续等宽段落块；被切开的块默认只警告（说明句夹两块常是合法结构）")
     ap.add_argument("--blocks-fail", action="store_true",
                     help="与 --blocks 相同，但切开当作错误（退出码 1）")
+    ap.add_argument("--blocks-summary", action="store_true",
+                    help="与 --blocks 相同，但只印摘要与告警，不逐条列块（给循环/CI 用）")
     ap.add_argument("--prose-space", action="store_true",
                     help="正文（非等宽块）中文贴着英文、或 / $ 贴着中文则失败")
     ap.add_argument("--indent", metavar="文本", action="append",
@@ -430,8 +436,9 @@ def main():
     print(
         f"structure: headings {len(hs)} | top {len(tops)} | tables {n_tbl} | images {n_img} | notes {n_ann}"
     )
-    if args.blocks or args.blocks_fail:
-        audit_blocks(path, problems, fail=args.blocks_fail)
+    if args.blocks or args.blocks_fail or args.blocks_summary:
+        audit_blocks(path, problems, fail=args.blocks_fail,
+                     summary=args.blocks_summary and not args.blocks)
     if args.prose_space:
         audit_prose_space(path, problems)
     for needle in args.indent or []:
@@ -476,9 +483,12 @@ def main():
         if m:
             dups.append(collapsed[:80])
     if dups:
-        print(f"adjacent-repeat hints {len(dups)} (inspect; may be genuine):")
+        # 提示走 stderr：留在 stdout 里会污染管道（round.sh / CI 只看摘要与失败）。
+        # 键为 "  - " 的失败详情因此可以放心 grep。
+        sys.stderr.write("adjacent-repeat hints %d (inspect; may be genuine):\n"
+                         % len(dups))
         for x in dups[:8]:
-            print("  -", x)
+            sys.stderr.write("  - %s\n" % x)
 
     toc = next((e for e in body.children if e.tag == "text:table-of-content"), None)
     if toc is None:

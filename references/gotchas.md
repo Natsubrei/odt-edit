@@ -17,6 +17,7 @@
 13. **改已有文字用 `H.replace_text(el, old, new, expect=1)`**，别用 `set_el_text` 整段重写：后者会丢掉 span、书签和 `text:soft-page-break`。`replace_text` 命中数不符直接抛异常，等于自带断言。
 14. **改文档属性走 odfdo 的 mixin**：`doc.meta.set_title(...)`、`doc.meta.set_modification_date(datetime)`。没有 `_xml_element`，也没有 `find()`。
 15. **克隆已有段落当模板，先清空子节点再写文本。** 文本框/文件内容块的末行常被拆成多个 span，克隆它做模板后，只写首个 span 的助手会留下残余 span，旧文字直接接到新文字后面。真实事故：往 yml 框追加一行，框末行 `xpack.security.enabled: false` 有 2 个 span，渲染出 `bootstrap.memory_lock: true false`。修法：用 `H.clone_row(tpl, text)`（它已按「先清空再写」实现），或自己 `for c in list(tpl): tpl.remove(c)` 后再写 `.text`。检测：`check_odt.py --blocks` 会报出被非等宽行切开的块。
+16. **删块里的行用 `H.drop_row`；末行的 `*End` 样式必须移交。** 文件内容块的末行带哨兵样式（如 `TBMFileEnd`），那个样式带下边框/圆角。直接 `el.getparent().remove(el)` 删掉末行，块就以普通行收尾，渲染上少一条收边，XML 里看不出异常。`H.drop_row(el)` 在删除行带 `*End` 时把样式移交给新的前一行。删中间行不会命中，随便删。真实形状：从 `flume.conf` 块里删掉 3 行死参数（都是中间行，安全）；若删的是最后一行 `a1.sinks.k3.channel = c3`，就必须移交样式。
 
 ## 标准助手（import，不要复制）
 
@@ -44,6 +45,7 @@ doc.save("新文件.odt")
 | `make_p(style, text, span=None)` | 造段落：`\n`→line-break，`\t`→tab，连续空格→`text:s` | 等宽行要传原文档的 span 样式名 |
 | `make_h(level, text, style)` | 造标题并补回 style | odfdo 的 `Header` 会丢 style |
 | `insert_after` / `insert_before(el, new)` | 按参照元素插入（lxml addnext） | `el`/`new` 可以是 odfdo 或裸 lxml |
+| `drop_row(el)` | 删一行；带 `*End` 样式时移交给新的末行 | 返回新的前一行，没有则 None |
 | `set_style(el, style)` | 改段落/span 的样式名 | |
 
 两条不看代码就不知道的语义：
