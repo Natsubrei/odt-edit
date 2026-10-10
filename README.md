@@ -41,7 +41,8 @@ ODT_EDIT_BUILD_IMAGE=1 bash scripts/setup_env.sh
 | `scripts/make_examples.py` | Write `examples/*.odt` fixtures |
 
 `check_odt.py` flags: `--require-toc` `--require-chapter-seq` `--forbid-nbsp` `--forbidden a,b`
-`--font-audit` (undefined styles / broken inheritance) `--blocks` (monospaced-block structure)
+`--font-audit` (undefined styles / broken inheritance) `--blocks` (list blocks; splits are notes)
+`--blocks-fail` (splits are errors) `--prose-space` (CJK stuck to Latin or `/` `$`)
 `--indent TEXT` (leading spaces, `text:s` expanded) `--render` (also check the render output)
 `--toc-pages` (TOC numbers vs render pagination).
 

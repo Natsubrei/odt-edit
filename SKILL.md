@@ -58,7 +58,7 @@ doc.save("新文件.odt")
 - `replace_text(el, old, new, expect=1)` — 改已有文字的首选：只动文字槽，span、书签、`text:soft-page-break` 全部保留，命中数不等于 `expect` 就抛异常。
 - `set_el_text(el, s)` — 只用于**叶子**标题/段落（它会把段内结构抹平）。不要用 odfdo 的 `text_content` setter。禁止对 `text:list-item` 调用（会抛 `ValueError`）：它会删掉下级 list。改编号条目的说明文字用 `set_item_label`。
 - `make_p(style, text, span=None)` — 造段落。`\n`→line-break、`\t`→tab、**连续空格必须编码为 " "+`<text:s text:c="n-1"/>`**（ODF 会折叠字面空格串）。原文若用 span 包等宽内容，把那个 span 的样式名传进去。
-- `insert_after/insert_before(el, new)` — 基于 `xmlposition=NEXT_SIBLING/PREV_SIBLING`，参照物是调用者自身。
+- `insert_after/insert_before(el, new)` — 底层 `xml_of(el).addnext/addprevious`。`el` 与 `new` 都可以是 odfdo 对象或裸 lxml 元素。
 - `make_h(level, text, style)` — odfdo 的 `Header` 会丢 style，这个助手补回来。
 - `clone_row(tpl, text, indent=None)` — 以已有段落为模板造一行，段落样式跟着模板。**往文件内容块或文本框里追行时用它**：模板末行常被拆成多个 span，只替换首个 span 的写法会残留旧文字（`… : true false`）。`indent=None` 沿用模板的前导缩进。
 - `leading_spaces(el)` — 段落的前导空格数，`<text:s text:c="n"/>` 按 n 展开。**量缩进必须用它**：`itertext()` 与 `text_recursive` 都不展开 `text:s`，结果恒为 0。
@@ -97,12 +97,14 @@ python3 <本技能目录>/scripts/check_odt.py 新文件.odt --toc-pages        
 
 ```bash
 python3 <本技能目录>/scripts/check_odt.py 新文件.odt --blocks
+python3 <本技能目录>/scripts/check_odt.py 新文件.odt --blocks-fail
+python3 <本技能目录>/scripts/check_odt.py 新文件.odt --prose-space
 python3 <本技能目录>/scripts/check_odt.py 新文件.odt --indent "<name>dfs.blocksize</name>"
 ```
 
-- `--blocks`：把正文切成连续等宽块，列出「章节 / 行数 / 首行」，并报出**被非等宽行切开**的块。
-  往已有的文件内容块后面追行时，中间插了一句引导语就会切成两段——XML 看着完全正常，
-  渲染上是灰底断带。编号步骤句（`3. …`、`（3）…`）视为合法分隔，不报。
+- `--blocks`：列出连续等宽块。切开默认只警告（退出 0）——说明句夹在两个文件块之间常是合法结构。
+  要当错误退出加 `--blocks-fail`。编号步骤句（`3. …`、`（3）…`）视为合法分隔，不报。
+- `--prose-space`：正文（非等宽块）里中文贴着英文、或 `/` `$` 贴着中文则失败。配置块不查。
 - `--indent`：打印匹配段落的前导空格数（展开 `text:s`）与样式名，可重复传多个。
   `diff_odt.py`、`odt_text.py`、`render.txt` 都不展开 `text:s`：等宽行的对齐在纯文本层完全看不见，
   改错了也看不出来。
@@ -133,7 +135,7 @@ bash <本技能目录>/scripts/render.sh 新文件.odt --refresh-toc  # 刷新�
 
 每次运行都会打印 `PDF: 重新转换` 或 `PDF: 复用…`：改完文档却看到「复用」，说明容器时钟有偏差，加 `--force`。刷新目录后 `check_odt.py --toc-pages` 仍报漂移时，按 gotchas「目录页码可能不收敛」回填数字。
 
-逐页目检**被修改的页 + 抽查未修改的页**。同一 profile 的 soffice 不能并行（容器内已用独立 profile 规避）。逐页比对渲染图能一次点出所有实际变化页：
+不要把整页 PNG 读进对话。先 `cmp` 找出变化页，细节用 `--crop` / `--bg`。同一 profile 的 soffice 不能并行（容器内已用独立 profile 规避）。
 
 ```bash
 for f in $OLD/pages/*.png; do cmp -s "$f" "$NEW/pages/$(basename "$f")" || echo "DIFF $(basename "$f")"; done

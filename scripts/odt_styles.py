@@ -22,9 +22,9 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import add_pylib  # noqa: E402
+from paths import require_deps  # noqa: E402
 
-add_pylib()
+require_deps()
 
 from lxml import etree          # noqa: E402
 from odfdo import Document      # noqa: E402

@@ -25,3 +25,22 @@ def add_pylib():
     if here not in sys.path:
         sys.path.insert(0, here)
     return lib
+
+
+def require_deps():
+    """add_pylib 之后确认 odfdo/lxml 能 import。缺依赖时告诉调用者跑 setup_env.sh。"""
+    add_pylib()
+    missing = []
+    for name in ("odfdo", "lxml"):
+        try:
+            __import__(name)
+        except ImportError:
+            missing.append(name)
+    if missing:
+        here = os.path.dirname(os.path.abspath(__file__))
+        sys.stderr.write(
+            "缺少 Python 依赖：%s\n先跑：bash %s/setup_env.sh --python-only\n"
+            % (", ".join(missing), here)
+        )
+        sys.exit(2)
+    return pylib()

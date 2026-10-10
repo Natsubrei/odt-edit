@@ -5,8 +5,8 @@
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import add_pylib
-add_pylib()
+from paths import require_deps
+require_deps()
 
 TEXT = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
 A_STYLE = "{%s}style-name" % TEXT

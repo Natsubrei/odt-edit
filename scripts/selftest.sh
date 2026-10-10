@@ -165,19 +165,32 @@ if python3 "$HERE/odt_probe.py" "$ROOT/examples/leaf.odt" --pages 2>/dev/null; t
   exit 1
 fi
 
-# --blocks：两个 2 行的等宽块被一句普通正文切开，必须报出来（渲染上是灰底断带）
+# --blocks：切开默认只警告（退出 0）；--blocks-fail 才当错误
 BLK="$ROOT/examples/split-block.odt"
-if python3 "$HERE/check_odt.py" "$BLK" --blocks >/tmp/_blk.txt 2>&1; then
-  echo "expected --blocks to fail on a split block" >&2
-  cat /tmp/_blk.txt >&2
+python3 "$HERE/check_odt.py" "$BLK" --blocks >/tmp/_blk.txt 2>&1 || {
+  echo "--blocks 默认不应失败" >&2; cat /tmp/_blk.txt >&2; exit 1
+}
+grep -q "切开" /tmp/_blk.txt
+if python3 "$HERE/check_odt.py" "$BLK" --blocks-fail >/tmp/_blkf.txt 2>&1; then
+  echo "expected --blocks-fail to fail on a split block" >&2
+  cat /tmp/_blkf.txt >&2
   exit 1
 fi
-grep -q "切开" /tmp/_blk.txt
+grep -q "切开" /tmp/_blkf.txt
 # 没被切开的文档不应报切开
 if python3 "$HERE/check_odt.py" "$ROOT/examples/leaf.odt" --blocks 2>/dev/null | grep -q "切开"; then
   echo "--blocks 误报：leaf.odt 没有等宽块" >&2
   exit 1
 fi
+
+# --prose-space：正文 /opt/目录 必须报；leaf 没有中文贴英文，应通过
+if python3 "$HERE/check_odt.py" "$BLK" --prose-space >/tmp/_psp.txt 2>&1; then
+  echo "expected --prose-space to fail on /opt/目录" >&2
+  cat /tmp/_psp.txt >&2
+  exit 1
+fi
+grep -q "未空开" /tmp/_psp.txt
+python3 "$HERE/check_odt.py" "$ROOT/examples/leaf.odt" --prose-space >/dev/null
 
 # --indent：text:s 必须展开（" " + text:s c=3 → 4），不能用 itertext 量成 0
 python3 "$HERE/check_odt.py" "$BLK" --indent "indented line" | grep -q "indent=4" \

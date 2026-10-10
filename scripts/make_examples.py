@@ -74,6 +74,7 @@ BODIES = {
     "split-block.odt": (
         "split-block",
         """<text:h text:outline-level="1">Blocks</text:h>
+<text:p>解压到 /opt/目录。</text:p>
 <text:p text:style-name="Mono"># cmd one</text:p>
 <text:p text:style-name="Mono"># cmd two</text:p>
 <text:p>Stray lead-in sentence.</text:p>

@@ -4,7 +4,7 @@
 
 1. **`Paragraph(text=...)` 是错的**。构造参数名是 `text_or_element`，传 `text=` 会落进 `**kwargs` 被静默忽略，得到**空段落**。用位置参数：`Paragraph("文本", style="P12")`。
 2. **`Header(level, text, style)` 会丢弃 style**。创建后手动补：`h._xml_element.set("{text-ns}style-name", style)`（text-ns = `urn:oasis:names:tc:opendocument:xmlns:text:1.0`）。
-3. **没有 `getparent()`**。用 `el.parent`；删除用 `el.delete()`（自动保留 tail）；插入用 `el.insert(new, xmlposition=NEXT_SIBLING/PREV_SIBLING)`——参照物是**调用者自身**，不是父节点。
+3. **odfdo 元素没有 `getparent()`**。用 `el.parent`；删除用 `el.delete()`（自动保留 tail）。**不要**再写 `el.insert(..., xmlposition=NEXT_SIBLING)`：`H.insert_after` / `H.insert_before` 已经改成 `xml_of(el).addnext/addprevious`，可接 odfdo 对象或裸 lxml 元素。
 4. **`list.index(odfdo元素)` 不可靠**（包装对象身份问题）。用 `el._xml_element.getparent().index(el._xml_element)`。
 5. **`text_content` setter 是给单元格/文本框用的**。对 text:p/text:h 使用时它会把新文本包成内嵌 `<text:p>` 插进去而不删旧内容 → **文本翻倍**。改叶子段落用 `set_el_text`；改带下级 list 的条目用 `set_item_label`。
 6. **`el.text_recursive` 可能抛异常**：对含脚注的列表、TOC 触发 odfdo 内部 KeyError('footnote')。所有遍历读取都要 try/except 包裹；能跳过 `text:list`、`text:table-of-content`、`table:table`、`text:note` 就跳过。
@@ -43,7 +43,7 @@ doc.save("新文件.odt")
 | `set_item_label(item, s)` | 只改 list-item 的首个 p，保留下级 list | |
 | `make_p(style, text, span=None)` | 造段落：`\n`→line-break，`\t`→tab，连续空格→`text:s` | 等宽行要传原文档的 span 样式名 |
 | `make_h(level, text, style)` | 造标题并补回 style | odfdo 的 `Header` 会丢 style |
-| `insert_after` / `insert_before(el, new)` | 按参照元素插入 | 参照物是 `el` 自身，不是父节点 |
+| `insert_after` / `insert_before(el, new)` | 按参照元素插入（lxml addnext） | `el`/`new` 可以是 odfdo 或裸 lxml |
 | `set_style(el, style)` | 改段落/span 的样式名 | |
 
 两条不看代码就不知道的语义：

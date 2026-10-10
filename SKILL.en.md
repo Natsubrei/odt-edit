@@ -58,7 +58,7 @@ doc.save("new.odt")
 - `replace_text(el, old, new, expect=1)` — the default for editing existing text: it only touches text slots, so spans, bookmarks and `text:soft-page-break` survive. Raises when the hit count differs from `expect`.
 - `set_el_text(el, s)` — leaf heading/paragraph only (it flattens the paragraph's structure). Do not use odfdo `text_content`. **Raises ValueError on `text:list-item`** (it deletes nested lists). Use `set_item_label` for a numbered item.
 - `make_p(style, text, span=None)` — `\n`→line-break, `\t`→tab, consecutive spaces as `" "` + `<text:s text:c="n-1"/>`. If the original wraps monospaced text in a span, pass that span style name.
-- `insert_after` / `insert_before` — `xmlposition=NEXT_SIBLING/PREV_SIBLING`, relative to the caller.
+- `insert_after` / `insert_before` — `xml_of(el).addnext/addprevious`. `el` and `new` may be odfdo objects or raw lxml elements.
 - `make_h(level, text, style)` — odfdo `Header` drops the style; this puts it back.
 - `clone_row(tpl, text, indent=None)` — build a line from an existing paragraph as template (the paragraph style follows the template). **Use it when appending rows to a file-content block or text box**: the template's last line is often split across several spans, and helpers that replace only the first span leave the old text behind (`… : true false`). `indent=None` keeps the template's indent.
 - `leading_spaces(el)` — leading spaces, `<text:s text:c="n"/>` expanded. **Always use it to measure indent**: neither `itertext()` nor `text_recursive` expands `text:s`, so they always read 0.
@@ -97,13 +97,15 @@ Block structure and alignment (invisible to plain text extraction; run it after 
 
 ```bash
 python3 <skill-dir>/scripts/check_odt.py new.odt --blocks
+python3 <skill-dir>/scripts/check_odt.py new.odt --blocks-fail
+python3 <skill-dir>/scripts/check_odt.py new.odt --prose-space
 python3 <skill-dir>/scripts/check_odt.py new.odt --indent "<name>dfs.blocksize</name>"
 ```
 
-- `--blocks`: lists contiguous monospaced blocks (chapter / line count / first line) and reports blocks
-  **split by a non-monospaced line**. Inserting a lead-in sentence in the middle of an existing file-content
-  block splits it in two — the XML looks fine, the render shows a gap in the shaded background.
+- `--blocks`: lists contiguous monospaced blocks. Splits are **notes** (exit 0) by default — a lead-in
+  sentence between two file snippets is often legitimate. Pass `--blocks-fail` to treat splits as errors.
   Numbered step lines (`3. …`, `（3）…`) count as legitimate separators and are not reported.
+- `--prose-space`: fail if body text (not monospaced blocks) has CJK stuck to Latin, or `/` `$` stuck to CJK.
 - `--indent`: leading spaces (with `text:s` expanded) and style name per matching paragraph; repeatable.
 
 **Why this matters:** zip, TOC, and chapter numbering can all pass while styles are entirely

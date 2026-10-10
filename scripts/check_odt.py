@@ -10,8 +10,8 @@ Exit 0=pass 1=fail.
 LibreOffice 不把自动样式当父样式，不认识的样式名也不报错，两处都静默回落到默认样式。
 """
 import sys, os, re, zipfile, argparse
-from paths import add_pylib, work
-add_pylib()
+from paths import require_deps, work
+require_deps()
 
 
 def _hex_rgb(v):
@@ -206,7 +206,7 @@ def audit_toc_pages(path, problems):
                         "不收敛时按渲染分页回填目录字段里的数字" % (len(bad), len(entries), detail, more))
 
 
-def audit_blocks(path, problems):
+def audit_blocks(path, problems, fail=False):
     """把正文切成“连续等宽段落块”，报告块被切碎的地方。
 
     等宽行就是命令/文件内容块。块被一个普通段落从中间切开时，渲染上会出现
@@ -284,8 +284,14 @@ def audit_blocks(path, problems):
         detail = "; ".join("%s「%s」(%d 行块后接 %d 行块)"
                            % (ch, (t or "(空行)")[:28], n1, n2) for ch, _k, t, n1, n2 in split_at[:6])
         more = "；另有 %d 处" % (len(split_at) - 6) if len(split_at) > 6 else ""
-        problems.append("等宽块被非等宽行切开 %d 处（渲染会出现底色断带、"
-                        "该行字体也不一致）：%s%s" % (len(split_at), detail, more))
+        msg = ("等宽块被非等宽行切开 %d 处（渲染会出现底色断带、"
+               "该行字体也不一致）：%s%s" % (len(split_at), detail, more))
+        # 默认可选警告：说明句夹在两个文件块之间（zoo.cfg / logback）是合法结构。
+        # 要当错误退出加 --blocks-fail。
+        if fail:
+            problems.append(msg)
+        else:
+            print("note:", msg)
     ones = [b for b in blocks if b[1] == 1]
     if ones:
         print("  提示：单行块 %d 个（合法但常是被切断的块），例：%s"
@@ -317,6 +323,55 @@ def audit_indent(path, needle):
     return hits
 
 
+_PROSE_STUCK = (
+    re.compile(r"[\u4e00-\u9fff][A-Za-z/$]"),
+    re.compile(r"[A-Za-z/$][\u4e00-\u9fff]"),
+)
+
+
+def audit_prose_space(path, problems):
+    """正文（非等宽块）里中文贴着英文，或 / $ 贴着中文。配置块不查。"""
+    from lxml import etree
+    import odt_styles as S
+
+    info = S.analyse(path)
+    skip = {}
+    for row in info["paragraphs"]:
+        props = row["actual"]
+        font = " ".join(str(props.get(k) or "")
+                         for k in ("font", "font_family", "font_asian"))
+        skip[row["name"]] = bool(re.search(r"Mono|Consol|Courier", font, re.I)) or \
+            bool(re.search(r"Code|File|Mono|Pre", row["name"] or ""))
+
+    content = S.build(path)[0]
+    body = content.find(".//" + S.q(S.OFFICE, "text"))
+    if body is None:
+        problems.append("--prose-space 找不到正文节点")
+        return
+    hits = []
+    chapter = ""
+    for e in body.iter():
+        if not isinstance(e.tag, str):
+            continue
+        local = etree.QName(e).localname
+        if local == "h":
+            chapter = "".join(e.itertext()).strip()
+        if local not in ("p", "h"):
+            continue
+        style = e.get(S.q(S.TEXT, "style-name"))
+        if skip.get(style):
+            continue
+        text = "".join(e.itertext())
+        if any(rx.search(text) for rx in _PROSE_STUCK):
+            hits.append((chapter, text.strip()[:48]))
+    if hits:
+        detail = "; ".join("%s「%s」" % (ch or "(无章节)", t) for ch, t in hits[:8])
+        more = "；另有 %d 处" % (len(hits) - 8) if len(hits) > 8 else ""
+        problems.append("正文中英文或路径未空开 %d 处：%s%s" % (len(hits), detail, more))
+    else:
+        print("prose-space: 正文中英文已空开")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("path")
@@ -327,7 +382,11 @@ def main():
     ap.add_argument("--font-audit", action="store_true",
                     help="检查样式是否真正生效（未定义样式 / 继承断裂）")
     ap.add_argument("--blocks", action="store_true",
-                    help="列出连续等宽段落块，报告被非等宽行切开的块（灰底断带）")
+                    help="列出连续等宽段落块；被切开的块默认只警告（说明句夹两块常是合法结构）")
+    ap.add_argument("--blocks-fail", action="store_true",
+                    help="与 --blocks 相同，但切开当作错误（退出码 1）")
+    ap.add_argument("--prose-space", action="store_true",
+                    help="正文（非等宽块）中文贴着英文、或 / $ 贴着中文则失败")
     ap.add_argument("--indent", metavar="文本", action="append",
                     help="打印匹配段落的前导空格数（展开 text:s）与样式名；可重复")
     ap.add_argument("--render", action="store_true",
@@ -371,8 +430,10 @@ def main():
     print(
         f"structure: headings {len(hs)} | top {len(tops)} | tables {n_tbl} | images {n_img} | notes {n_ann}"
     )
-    if args.blocks:
-        audit_blocks(path, problems)
+    if args.blocks or args.blocks_fail:
+        audit_blocks(path, problems, fail=args.blocks_fail)
+    if args.prose_space:
+        audit_prose_space(path, problems)
     for needle in args.indent or []:
         audit_indent(path, needle)
     if not seq_ok:

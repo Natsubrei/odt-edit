@@ -17,9 +17,9 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import add_pylib, work  # noqa: E402
+from paths import require_deps, work  # noqa: E402
 
-add_pylib()
+require_deps()
 
 from odt_text import extract          # noqa: E402
 import odt_styles                     # noqa: E402

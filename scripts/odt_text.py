@@ -8,8 +8,8 @@ out.txt 省略时写 stdout（提示信息一律走 stderr，不污染管道）�
                出现"凭空少了几行"的假象（渲染出来其实没变）。
 """
 import sys, os, argparse
-from paths import add_pylib, work
-add_pylib()
+from paths import require_deps, work
+require_deps()
 
 
 def extract(path, out, keep_blanks=False):
