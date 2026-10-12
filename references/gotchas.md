@@ -18,6 +18,8 @@
 14. **改文档属性走 odfdo 的 mixin**：`doc.meta.set_title(...)`、`doc.meta.set_modification_date(datetime)`。没有 `_xml_element`，也没有 `find()`。
 15. **克隆已有段落当模板，先清空子节点再写文本。** 文本框/文件内容块的末行常被拆成多个 span，克隆它做模板后，只写首个 span 的助手会留下残余 span，旧文字直接接到新文字后面。真实事故：往 yml 框追加一行，框末行 `xpack.security.enabled: false` 有 2 个 span，渲染出 `bootstrap.memory_lock: true false`。修法：用 `H.clone_row(tpl, text)`（它已按「先清空再写」实现），或自己 `for c in list(tpl): tpl.remove(c)` 后再写 `.text`。检测：`check_odt.py --blocks` 会报出被非等宽行切开的块。
 16. **删块里的行用 `H.drop_row`；末行的 `*End` 样式必须移交。** 文件内容块的末行带哨兵样式（如 `TBMFileEnd`），那个样式带下边框/圆角。直接 `el.getparent().remove(el)` 删掉末行，块就以普通行收尾，渲染上少一条收边，XML 里看不出异常。`H.drop_row(el)` 在删除行带 `*End` 时把样式移交给新的前一行。删中间行不会命中，随便删。真实形状：从 `flume.conf` 块里删掉 3 行死参数（都是中间行，安全）；若删的是最后一行 `a1.sinks.k3.channel = c3`，就必须移交样式。
+17. **首行缩进用 cm，不用 em。** `fo:text-indent="2em"` 能进 XML，LibreOffice 经常不渲染，正文看起来没有缩进。`0.74cm` 约等于 12pt 下两个汉字。`odt_styles.py` / `--font-audit` 会把单位是 em 的首行缩进报成错误。
+18. **删表格行用 `H.drop_table_row`，不要用 `drop_row`。** `drop_row` 是给代码块段落的（移交 `*End` 样式）。表格行没有那套哨兵样式，对 `table:table-row` 调 `drop_row` 会按段落逻辑走。改某一格用 `H.set_cell_text`；按首列文字找行用 `H.find_table_row`。
 
 ## 标准助手（import，不要复制）
 
@@ -46,6 +48,9 @@ doc.save("新文件.odt")
 | `make_h(level, text, style)` | 造标题并补回 style | odfdo 的 `Header` 会丢 style |
 | `insert_after` / `insert_before(el, new)` | 按参照元素插入（lxml addnext） | `el`/`new` 可以是 odfdo 或裸 lxml |
 | `drop_row(el)` | 删一行；带 `*End` 样式时移交给新的末行 | 返回新的前一行，没有则 None |
+| `find_table_row(table, label, expect=1)` | 按首列文字找 `table-row` | 命中数不符抛异常 |
+| `set_cell_text(cell, s)` | 改单元格第一个 `text:p` | 单元格没有 p 会抛异常 |
+| `drop_table_row(row)` | 删掉一条 `table:table-row` | 不要对段落调用 |
 | `set_style(el, style)` | 改段落/span 的样式名 | |
 
 两条不看代码就不知道的语义：

@@ -138,6 +138,18 @@ el = defs[("text", "TSelfTest")]
 got = S.props_of(el).get("background")
 assert got == "#cff8b6", "text 样式的底色没被解析出来：%r" % got
 print("props_of 底色 OK")
+
+from lxml import etree
+el = etree.fromstring(
+    '<style:style xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" '
+    'xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" '
+    'style:name="JobBody" style:family="paragraph">'
+    '<style:paragraph-properties fo:text-indent="2em" fo:margin-left="0cm"/>'
+    '</style:style>')
+p = S.props_of(el)
+assert p.get("text_indent") == "2em", p
+assert p.get("indent") == "0cm", p
+print("props_of text_indent OK")
 PY
 rm -f "$ROOT/examples/_selftest_bg.odt"
 
@@ -170,6 +182,21 @@ if python3 "$HERE/odt_probe.py" "$ROOT/examples/leaf.odt" --find x 2>/dev/null; 
   echo "expected odt_probe --find to fail without a render" >&2
   exit 1
 fi
+
+# pdftoppm 短文档是 p-1.png，不是 p-01.png
+python3 - "$HERE" <<'PY'
+import os, sys, tempfile
+sys.path.insert(0, sys.argv[1])
+import odt_probe as P
+d = tempfile.mkdtemp()
+open(os.path.join(d, "p-1.png"), "wb").write(b"x")
+assert os.path.basename(P.resolve_page_png(d, 1)) == "p-1.png"
+os.remove(os.path.join(d, "p-1.png"))
+open(os.path.join(d, "p-01.png"), "wb").write(b"x")
+assert os.path.basename(P.resolve_page_png(d, 1)) == "p-01.png"
+assert P.resolve_page_png(d, 2) is None
+print("page_png padding OK")
+PY
 
 # --blocks：切开默认只警告（退出 0）；--blocks-fail 才当错误
 BLK="$ROOT/examples/split-block.odt"
@@ -268,6 +295,34 @@ assert p1.get(H.A_STYLE) == "TBMFileEnd", \
     "删末行后 End 样式没移交：%s" % p1.get(H.A_STYLE)
 assert "".join(body.itertext()) == "a", "drop_row 没真删"
 print("drop_row OK")
+
+# 表格行：按首列找、改格、删除
+TABLE = "urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+def tq(n):
+    return "{%s}%s" % (TABLE, n)
+tbl = etree.Element(tq("table"))
+def add_row(parent, a, b):
+    row = etree.SubElement(parent, tq("table-row"))
+    for s in (a, b):
+        cell = etree.SubElement(row, tq("table-cell"))
+        p = etree.SubElement(cell, q("p")); p.text = s
+    return row
+add_row(tbl, "学习内容", "预计时间")
+r_kvm = add_row(tbl, "KVM", "2 个月")
+add_row(tbl, "综合项目", "3 个月")
+hit = H.find_table_row(tbl, "KVM")
+assert hit is r_kvm
+H.set_cell_text(H.row_cells(hit)[1], "1 个月")
+assert "".join(H.row_cells(hit)[1].itertext()) == "1 个月"
+H.drop_table_row(H.find_table_row(tbl, "综合项目"))
+labels = ["".join(H.row_cells(r)[0].itertext()) for r in H.table_rows(tbl)]
+assert labels == ["学习内容", "KVM"], labels
+try:
+    H.drop_table_row(etree.Element(q("p")))
+    raise SystemExit("drop_table_row 本该拒绝段落")
+except ValueError:
+    pass
+print("table helpers OK")
 PY
 
 echo SELFTEST_OK

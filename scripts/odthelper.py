@@ -30,6 +30,7 @@ from lxml import etree  # noqa: E402
 from odfdo import Header, Paragraph  # noqa: E402
 
 TEXT = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+TABLE = "urn:oasis:names:tc:opendocument:xmlns:table:1.0"
 A_STYLE = "{%s}style-name" % TEXT
 
 
@@ -260,3 +261,50 @@ def replace_text(el, old, new, expect=1):
         raise ValueError("replace_text: %r 命中 %d 处，期望 %d 处"
                          % (old[:40], hits, expect))
     return hits
+
+
+def table_rows(table):
+    """产出全部 table:table-row，含 table-header-rows 里的。"""
+    x = xml_of(table)
+    for row in x.iter("{%s}table-row" % TABLE):
+        yield row
+
+
+def row_cells(row):
+    """一行里的 table:table-cell，按列序。"""
+    return xml_of(row).findall("{%s}table-cell" % TABLE)
+
+
+def find_table_row(table, label, expect=1):
+    """首列文字包含 label 的行。命中数不符就抛 ValueError。
+
+    expect=1 时返回那一行；否则返回列表。
+    """
+    hits = []
+    for row in table_rows(table):
+        cells = row_cells(row)
+        if cells and label in "".join(cells[0].itertext()):
+            hits.append(row)
+    if len(hits) != expect:
+        raise ValueError("find_table_row: %r 命中 %d 处，期望 %d 处"
+                         % (label[:40], len(hits), expect))
+    return hits[0] if expect == 1 else hits
+
+
+def set_cell_text(cell, s):
+    """改 table-cell 里第一个 text:p 的文字，保留单元格和段落样式。"""
+    p = xml_of(cell).find("{%s}p" % TEXT)
+    if p is None:
+        raise ValueError("table-cell 没有 text:p")
+    set_el_text(p, s)
+
+
+def drop_table_row(row):
+    """删掉一条 table:table-row。段落块用 drop_row（它会移交 *End 样式）。"""
+    x = xml_of(row)
+    if etree.QName(x).localname != "table-row":
+        raise ValueError("drop_table_row 只用于 table-row，段落用 drop_row")
+    parent = x.getparent()
+    if parent is None:
+        raise ValueError("drop_table_row 的元素不在树里")
+    parent.remove(x)

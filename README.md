@@ -6,6 +6,7 @@ Surgical edits for OpenDocument Text (`.odt`) files, plus check / diff / render 
 
 - Agent instructions: [`SKILL.md`](SKILL.md) (Chinese), [`SKILL.en.md`](SKILL.en.md) (English)
 - Pitfalls: [`references/gotchas.md`](references/gotchas.md)
+- New document (no existing ODT): [`references/new-document.md`](references/new-document.md)
 - License: [MIT](LICENSE)
 
 ## Setup

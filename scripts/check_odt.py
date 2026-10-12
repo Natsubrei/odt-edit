@@ -47,6 +47,13 @@ def audit_styles(path, problems):
                 "%s样式 `%s`（%d 处）的继承在自动样式 `%s` 处中断，丢失属性：%s"
                 % (label, r["name"], r["count"], r["broken_at"], " ".join(lost) or "—"))
             n_bad += 1
+    for r in a["paragraphs"]:
+        ti = str(r["actual"].get("text_indent") or "").rstrip()
+        if ti.endswith("em"):
+            problems.append(
+                "段落样式 `%s`（%d 处）首行缩进是 %s：LibreOffice 常不渲染 em，改成 cm"
+                % (r["name"], r["count"], ti))
+            n_bad += 1
     print("font-audit: %s" % ("发现 %d 处样式失效" % n_bad if n_bad
                                else "样式均生效（无未定义样式、无继承断裂）"))
 

@@ -1,6 +1,6 @@
 ---
 name: odt-edit
-description: Surgical edit, quality check, and version diff for .odt (OpenDocument Text) files. Use when the user wants to modify, inspect, or compare an ODT document, or to fix layout (alignment collapse, grey gaps, space folding, doubled text).
+description: Surgical edit, new-document creation, quality check, and version diff for .odt (OpenDocument Text) files. Use when the user wants to modify, write, inspect, or compare an ODT, or to fix layout (alignment collapse, grey gaps, space folding, doubled text).
 ---
 
 # Surgical ODT edit / check / diff
@@ -15,7 +15,11 @@ bash <skill-dir>/scripts/setup_env.sh
 
 Unpacks odfdo/lxml wheels into `$ODT_EDIT_PYLIB` (no pip). Optionally builds a LibreOffice image. `--python-only` skips Docker. See README for mirrors, architecture, and `ODT_EDIT_*` variables.
 
+Always `import odthelper` afterwards: it puts odfdo/lxml on `sys.path`. Do not `import odfdo` first.
+
 ## 1. Edit
+
+If the user wants a new document and the workspace has no ODT to edit: read `references/new-document.md` first (copy a Chinese template, clear the body), then edit as below. Do not `Document('text')` from scratch.
 
 Inspect structure first:
 
@@ -64,6 +68,7 @@ doc.save("new.odt")
 - `leading_spaces(el)` — leading spaces, `<text:s text:c="n"/>` expanded. **Always use it to measure indent**: neither `itertext()` nor `text_recursive` expands `text:s`, so they always read 0.
 - `clear_content(el)` — drop children and `.text`, keep attributes (style name).
 - `drop_row(el)` — delete one row paragraph. **If the removed row carries a `*End` paragraph style, the style moves to the new last row** (otherwise the block loses its closing edge).
+- Table rows: `find_table_row` / `set_cell_text` / `drop_table_row`. Do not call `drop_row` on `table:table-row`.
 
 Semantics and limits of each helper: see the table in `references/gotchas.md`.
 - Remove comments: delete `//office:annotation` and `//office:annotation-end`. Apply useful comment text to the body first.
@@ -76,6 +81,7 @@ Rules:
 - Do not touch a `text:note` subtree unless the footnote itself is the target.
 - **New lists: deepcopy an existing same-shape block** and change the strings. Bullet glyphs follow nesting depth (see gotchas “Lists”).
 - Numbers like `3.2` in headings are often **literal text**, not automatic numbering. After insert/delete, retitle later headings and search cross-references such as “see 3.2”.
+- **Before you reply:** run `check_odt.py`; write a diff next to the odt with `diff_odt.py`. The reply must include a slice and the full path. Add `--styles` when only styles changed.
 
 ## 2. Check
 
@@ -181,4 +187,4 @@ Bullet shape and indent: **PNG only**. For the hyphen-wrap and de-hyphenation tr
 python3 <skill-dir>/scripts/diff_odt.py old.odt new.odt out.diff
 ```
 
-Body extract (skip TOC, footnote-safe) + unified diff. Quote a slice in the reply and give the full diff path.
+Body extract (skip TOC, footnote-safe) + unified diff. Slice and path: see the last rule in section 1.

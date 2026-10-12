@@ -338,11 +338,24 @@ def png_save(path, w, h, rows):
     open(path, "wb").write(blob)
 
 
+def resolve_page_png(pages_dir, page):
+    """pdftoppm 按总页数决定零填充：2 页是 p-1.png，12 页是 p-01.png。"""
+    if not os.path.isdir(pages_dir):
+        return None
+    for name in os.listdir(pages_dir):
+        if not name.startswith("p-") or not name.endswith(".png"):
+            continue
+        num = name[2:-4]
+        if num.isdigit() and int(num) == page:
+            return os.path.join(pages_dir, name)
+    return None
+
+
 def page_png(odt, page):
-    d = out_dir(odt)
-    path = os.path.join(d, "pages", "p-%02d.png" % page)
-    if not os.path.isfile(path):
-        sys.exit("找不到 %s，先跑 render.sh（页码从 1 开始）" % path)
+    d = os.path.join(out_dir(odt), "pages")
+    path = resolve_page_png(d, page)
+    if path is None:
+        sys.exit("找不到 %s/p-%s.png，先跑 render.sh（页码从 1 开始）" % (d, page))
     return path
 
 

@@ -39,7 +39,8 @@ PARA_KEYS = [("font", "字体"), ("size", "字号"), ("line_height", "行高"),
              ("margin_top", "段前"), ("margin_bottom", "段后"),
              ("background", "底色"), ("color", "颜色"),
              ("weight", "粗"), ("style", "斜"), ("underline", "下划线"),
-             ("align", "对齐"), ("indent", "左缩进"), ("font_asian", "中文字体")]
+             ("align", "对齐"), ("indent", "左缩进"),
+             ("text_indent", "首行缩进"), ("font_asian", "中文字体")]
 TEXT_KEYS = [("font", "字体"), ("size", "字号"), ("color", "颜色"),
              ("weight", "粗"), ("style", "斜"), ("underline", "下划线"),
              ("background", "底色")]
@@ -61,7 +62,8 @@ def props_of(el):
                           ("margin_bottom", q(FO, "margin-bottom")),
                           ("background", q(FO, "background-color")),
                           ("align", q(FO, "text-align")),
-                          ("indent", q(FO, "margin-left"))):
+                          ("indent", q(FO, "margin-left")),
+                          ("text_indent", q(FO, "text-indent"))):
             v = pp.get(attr)
             if v is not None:
                 out[key] = v
@@ -263,6 +265,14 @@ def cmd_warn(path):
                   % (fam, len(miss)))
             for nm in miss:
                 print("      %s" % nm)
+    ems = [(r["name"], r["actual"].get("text_indent"), r["count"])
+           for r in a["paragraphs"]
+           if str(r["actual"].get("text_indent") or "").rstrip().endswith("em")]
+    if ems:
+        rc = 1
+        print("!! 首行缩进用了 em（LibreOffice 常不渲染，改成 cm，约 0.74cm = 两个汉字）")
+        for nm, ti, n in ems:
+            print("      %s x%d  %s" % (nm, n, ti))
     bad = [r for fam in ("paragraphs", "texts") for r in a[fam] if r["broken_at"]]
     if not bad:
         print("无继承风险：没有样式的父样式指向自动样式。")

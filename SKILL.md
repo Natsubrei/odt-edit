@@ -1,6 +1,6 @@
 ---
 name: odt-edit
-description: 对 .odt（OpenDocument 文本）文件做外科手术式修改、质量检查和版本 diff。凡是要修改/编辑/更新 odt 文档、修复 odt 排版问题（对齐塌陷、灰色空白、空格折叠、文字翻倍）、对比两个 odt 的差异、检查 odt 内容或样式是否被改坏，都用这个技能——即使用户只说"改一下这个文档"、"这两个文档有什么区别"或"检查一下文档"。
+description: 对 .odt（OpenDocument 文本）文件做外科手术式修改、新写、质量检查和版本 diff。凡是要改、新写、检查 odt，或对比两份 odt，都用这个技能——即使用户只说"改一下这个文档"、"新写一份 odt"、"这两个文档有什么区别"或"检查一下文档"。
 ---
 
 # ODT 外科手术式编辑 / 检查 / Diff
@@ -15,7 +15,11 @@ bash <本技能目录>/scripts/setup_env.sh
 
 把 odfdo/lxml wheel 解包到 `$ODT_EDIT_PYLIB`（默认 `$TMPDIR/odt-edit-<uid>/pylibs`，无需 pip）。有 Docker 时再构建 LibreOffice 镜像。只要 Python 依赖时加 `--python-only`。镜像源、架构、工作目录见仓库 README 的 `ODT_EDIT_*`。
 
+随后的 Python 一律 `import odthelper`：它会把 odfdo/lxml 加进 `sys.path`。不要先 `import odfdo`。
+
 ## 1. 修改
+
+用户要新写、工作区没有可改的 odt：先读 `references/new-document.md`（从中文模板复制、清正文），再按本节改内容。不要 `Document('text')` 从零建。
 
 先看结构，再动手：
 
@@ -64,6 +68,7 @@ doc.save("新文件.odt")
 - `leading_spaces(el)` — 段落的前导空格数，`<text:s text:c="n"/>` 按 n 展开。**量缩进必须用它**：`itertext()` 与 `text_recursive` 都不展开 `text:s`，结果恒为 0。
 - `clear_content(el)` — 清空内容（子节点 + `.text`），保留属性（样式名等）。
 - `drop_row(el)` — 删掉一行段落。**被删行带 `*End` 段落样式时，把样式移交给新的末行**（否则块少一条收边）。
+- 表格行：`find_table_row` / `set_cell_text` / `drop_table_row`。不要对 `table:table-row` 调用 `drop_row`。
 
 各函数的语义与限制见 `references/gotchas.md` 的对照表。
 - 清批注：遍历 `//office:annotation` 与 `//office:annotation-end` 逐个 `el.delete()`；批注里的合理建议应落实为正文再删除。
@@ -76,6 +81,7 @@ doc.save("新文件.odt")
 - 含脚注的段落不要动 `text:note` 子树，除非目标就是脚注本身。
 - **新列表：deepcopy 文档里已有的同结构块**，改文字，不要从零拼 XML。点的形状由嵌套深度决定，见 gotchas「列表」。
 - 标题里的 `3.2` 这类编号常常是**字面文本**，不是自动编号。插入或删除一节后，必须改后续标题，并全文搜「见 3.2」一类交叉引用。
+- **改完未答复前**：跑 `check_odt.py`；用 `diff_odt.py` 把 diff 写到工作目录（与 odt 同目录）。答复必须含摘录和完整路径。只改样式时加 `--styles`。
 
 ## 2. 检查
 
@@ -181,7 +187,7 @@ python3 <本技能目录>/scripts/diff_odt.py 旧文件.odt 新文件.odt 输出
 python3 <本技能目录>/scripts/diff_odt.py 旧文件.odt 新文件.odt 输出.diff --styles
 ```
 
-正文提取（跳过 TOC 字段、脚注安全）+ unified diff。答复用户时给摘录 + 完整 diff 文件路径。
+正文提取（跳过 TOC 字段、脚注安全）+ unified diff。摘录和路径见第 1 节最后一条规则。
 
 **只改样式的版本一定加 `--styles`。** 字号、行高、底色、颜色、字体继承这类改动，
 正文 diff 会是 `0 hunks`，看起来"没改动"。`--styles` 输出按属性分组的样式表差异，
